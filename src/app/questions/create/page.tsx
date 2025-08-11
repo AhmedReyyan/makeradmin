@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
-import { ChevronLeft, Save } from 'lucide-react'
+import { ChevronLeft, Save } from "lucide-react"
 import { PageShell } from "@/components/page-shell"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
@@ -17,6 +17,7 @@ import { PATH_COUNTS, type OnboardingPath, useQuestions } from "@/lib/questions"
 import type { QuestionType } from "@/components/badges"
 import { formatTypeLabel } from "@/components/badges"
 import { QuestionPreview } from "@/components/question-preview"
+import { OptionEditor } from "@/components/option-editor"
 
 type DraftState = {
   text: string
@@ -24,6 +25,7 @@ type DraftState = {
   paths: OnboardingPath[]
   required: boolean
   helpText: string
+  options: string[]
 }
 
 export default function CreateQuestionPage() {
@@ -36,6 +38,7 @@ export default function CreateQuestionPage() {
     paths: ["New Business"],
     required: false,
     helpText: "This helps us understand your business foundation and tailor recommendations.",
+    options: [],
   })
   const [autoPreview, setAutoPreview] = useState(true)
 
@@ -47,15 +50,21 @@ export default function CreateQuestionPage() {
     })
   }
 
-  const save = () => {
-    // Create the record, then patch with the draft fields.
-    const q = addBlank()
-    update(q.id, {
-      ...q,
-      ...state,
-      status: "draft",
+  const onTypeChange = (t: QuestionType) => {
+    setState((s) => {
+      const ensureOptions =
+        (t === "single_select" || t === "multi_select") && (!s.options || s.options.length === 0)
+          ? ["Option 1", "Option 2"]
+          : s.options
+      return { ...s, type: t, options: ensureOptions }
     })
-    router.replace(`/questions/${q.id}/edit`)
+  }
+
+  const save = () => {
+    const q = addBlank()
+    update(q.id, { ...q, ...state, status: "draft" })
+    router.replace('/questions')
+    // router.replace(`/questions/${q.id}/edit`)
   }
 
   return (
@@ -74,7 +83,6 @@ export default function CreateQuestionPage() {
       }
     >
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Left: Form */}
         <Card className="shadow-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Question Details</CardTitle>
@@ -90,66 +98,54 @@ export default function CreateQuestionPage() {
                 className="min-h-[96px]"
                 maxLength={500}
               />
-              <div className="text-xs text-muted-foreground text-right">
-                {state.text.length}/500 characters
-              </div>
+              <div className="text-xs text-muted-foreground text-right">{state.text.length}/500 characters</div>
             </div>
 
             <div className="grid gap-2">
               <Label>Question Type</Label>
-              <Select
-                value={state.type}
-                onValueChange={(v: QuestionType) => setState((s) => ({ ...s, type: v }))}
-              >
+              <Select value={state.type} onValueChange={onTypeChange as any}>
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Select a type" />
                 </SelectTrigger>
                 <SelectContent>
-                  {(["text", "single_select", "multi_select", "date"] as QuestionType[]).map(
-                    (t) => (
-                      <SelectItem key={t} value={t}>
-                        {formatTypeLabel(t)}
-                      </SelectItem>
-                    ),
-                  )}
+                  {(["text", "single_select", "multi_select", "date"] as QuestionType[]).map((t) => (
+                    <SelectItem key={t} value={t}>
+                      {formatTypeLabel(t)}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
 
+            {(state.type === "single_select" || state.type === "multi_select") && (
+              <OptionEditor options={state.options} onChange={(opts) => setState((s) => ({ ...s, options: opts }))} />
+            )}
+
             <div className="grid gap-2">
               <Label>Onboarding Paths</Label>
               <div className="rounded-md border">
-                {(["New Business", "Existing Business", "Growth Stage"] as OnboardingPath[]).map(
-                  (p, i) => (
-                    <div
-                      key={p}
-                      className="flex items-center justify-between gap-3 p-3 border-b last:border-b-0"
-                    >
-                      <div className="flex items-center gap-3">
-                        <Checkbox
-                          id={`path-${i}`}
-                          checked={state.paths.includes(p)}
-                          onCheckedChange={() => togglePath(p)}
-                        />
-                        <Label htmlFor={`path-${i}`} className="text-sm font-normal">
-                          {p}
-                        </Label>
-                      </div>
-                      <span className="text-xs text-muted-foreground">
-                        {PATH_COUNTS[p]} users
-                      </span>
+                {(["New Business", "Existing Business", "Growth Stage"] as OnboardingPath[]).map((p, i) => (
+                  <div key={p} className="flex items-center justify-between gap-3 p-3 border-b last:border-b-0">
+                    <div className="flex items-center gap-3">
+                      <Checkbox
+                        id={`path-${i}`}
+                        checked={state.paths.includes(p)}
+                        onCheckedChange={() => togglePath(p)}
+                      />
+                      <Label htmlFor={`path-${i}`} className="text-sm font-normal">
+                        {p}
+                      </Label>
                     </div>
-                  ),
-                )}
+                    <span className="text-xs text-muted-foreground">{PATH_COUNTS[p]} users</span>
+                  </div>
+                ))}
               </div>
             </div>
 
             <div className="flex items-center justify-between rounded-md border p-3">
               <div>
                 <div className="text-sm font-medium">Required Question</div>
-                <div className="text-xs text-muted-foreground">
-                  Users must answer to continue
-                </div>
+                <div className="text-xs text-muted-foreground">Users must answer to continue</div>
               </div>
               <Switch
                 checked={state.required}
@@ -183,7 +179,6 @@ export default function CreateQuestionPage() {
           </CardContent>
         </Card>
 
-        {/* Right: Live preview + toggle */}
         <div className="space-y-3">
           <Card className="shadow-sm">
             <CardHeader className="pb-2">
@@ -196,6 +191,7 @@ export default function CreateQuestionPage() {
                   type: state.type,
                   helpText: state.helpText,
                   required: state.required,
+                  options: state.options,
                 }}
                 currentPath={state.paths[0]}
               />
@@ -205,11 +201,7 @@ export default function CreateQuestionPage() {
           <Card className="shadow-sm">
             <CardContent className="flex items-center justify-between p-4">
               <div className="flex items-center gap-2">
-                <Switch
-                  checked={autoPreview}
-                  onCheckedChange={(v) => setAutoPreview(!!v)}
-                  id="auto"
-                />
+                <Switch checked={autoPreview} onCheckedChange={(v) => setAutoPreview(!!v)} id="auto" />
                 <label htmlFor="auto" className="text-sm">
                   Preview updates automatically as you edit
                 </label>
