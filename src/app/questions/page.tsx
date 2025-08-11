@@ -85,7 +85,7 @@ function QuestionsTable() {
   // Drag and drop handlers for reorder mode (works across full list)
   const onDragStart = (id: string) => setDragId(id)
   const onDragOver = (e: React.DragEvent<HTMLTableRowElement>) => e.preventDefault()
-  const onDrop = (overId: string) => {
+  const onDrop = async (overId: string) => {
     if (!dragId || dragId === overId) return
     const ids = filtered.map((r) => r.id)
     const from = ids.indexOf(dragId)
@@ -94,8 +94,18 @@ function QuestionsTable() {
     const next = [...ids]
     const [moved] = next.splice(from, 1)
     next.splice(to, 0, moved)
-    reorderQuestions(next) // persists order
-    setDragId(null)
+    
+    try {
+      await reorderQuestions(next); // persists order
+      setDragId(null);
+    } catch (error) {
+      console.error("Failed to reorder questions:", error);
+      toast({ 
+        title: "Error", 
+        description: "Failed to reorder questions. Please try again.", 
+        variant: "destructive" 
+      });
+    }
   }
 
   const allSelectedOnPage = !reorderMode && pageRows.length > 0 && pageRows.every((r) => selected.includes(r.id))
@@ -108,24 +118,56 @@ function QuestionsTable() {
   }
 
   const bulk = {
-    activate: () => {
+    activate: async () => {
       if (!selected.length) return
-      bulkUpdate(selected, { status: "active" })
-      toast({ title: "Activated", description: `${selected.length} question(s) activated.` })
-      setSelected([])
+      try {
+        await bulkUpdate(selected, { status: "active" });
+        toast({ title: "Activated", description: `${selected.length} question(s) activated.` });
+        setSelected([]);
+      } catch (error) {
+        console.error("Failed to activate questions:", error);
+        toast({ 
+          title: "Error", 
+          description: "Failed to activate questions. Please try again.", 
+          variant: "destructive" 
+        });
+      }
     },
-    deactivate: () => {
+    deactivate: async () => {
       if (!selected.length) return
-      bulkUpdate(selected, { status: "inactive" })
-      toast({ title: "Deactivated", description: `${selected.length} question(s) deactivated.` })
-      setSelected([])
+      try {
+        await bulkUpdate(selected, { status: "inactive" });
+        toast({ title: "Deactivated", description: `${selected.length} question(s) deactivated.` });
+        setSelected([]);
+      } catch (error) {
+        console.error("Failed to deactivate questions:", error);
+        toast({ 
+          title: "Error", 
+          description: "Failed to deactivate questions. Please try again.", 
+          variant: "destructive" 
+        });
+      }
     },
-    delete: () => {
+    delete: async () => {
       if (!selected.length) return
       if (!confirm(`Delete ${selected.length} question(s)?`)) return
-      selected.forEach((id) => remove(id))
-      toast({ title: "Deleted", description: `${selected.length} question(s) deleted.` })
-      setSelected([])
+      
+      try {
+        // Process deletes sequentially to avoid overloading the server
+        for (const id of selected) {
+          await remove(id);
+        }
+        
+        toast({ title: "Deleted", description: `${selected.length} question(s) deleted.` });
+        setSelected([]);
+      } catch (error) {
+        console.error("Failed to delete questions:", error);
+        toast({ 
+          title: "Error", 
+          description: "Failed to delete questions. Please try again.", 
+          variant: "destructive" 
+        });
+      }
     },
   }
 
@@ -291,9 +333,18 @@ function QuestionsTable() {
                         <Button
                           variant="ghost"
                           size="icon"
-                          onClick={() => {
-                            const copy = duplicate(row.id)
-                            if (copy) router.push(`/questions/${copy.id}/edit`)
+                          onClick={async () => {
+                            try {
+                              const copy = await duplicate(row.id);
+                              if (copy) router.push(`/questions/${copy.id}/edit`);
+                            } catch (error) {
+                              console.error("Failed to duplicate question:", error);
+                              toast({ 
+                                title: "Error", 
+                                description: "Failed to duplicate question. Please try again.", 
+                                variant: "destructive" 
+                              });
+                            }
                           }}
                         >
                           <Copy className="size-4" />
@@ -301,9 +352,22 @@ function QuestionsTable() {
                         <Button
                           variant="ghost"
                           size="icon"
-                          onClick={() => {
+                          onClick={async () => {
                             if (!confirm("Delete this question?")) return
-                            remove(row.id)
+                            try {
+                              await remove(row.id);
+                              toast({ 
+                                title: "Question Deleted", 
+                                description: "The question has been deleted successfully." 
+                              });
+                            } catch (error) {
+                              console.error("Failed to delete question:", error);
+                              toast({ 
+                                title: "Error", 
+                                description: "Failed to delete question. Please try again.", 
+                                variant: "destructive" 
+                              });
+                            }
                           }}
                         >
                           <Trash2 className="size-4 text-rose-600" />

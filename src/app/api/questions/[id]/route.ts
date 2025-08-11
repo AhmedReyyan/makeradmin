@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import connectToDatabase from '@/lib/mongodb';
 import { 
   getQuestionById, 
@@ -6,16 +6,18 @@ import {
   deleteQuestion 
 } from '@/lib/db-models';
 
-interface RouteParams {
-  params: {
-    id: string;
-  };
+// Make params.id safe to use
+interface Params {
+  id: string;
 }
 
 // GET /api/questions/[id] - Get a single question
-export async function GET(request: Request, { params }: RouteParams) {
+export async function GET(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
   try {
-    const { id } = params;
+    const id = params.id;
     await connectToDatabase();
     
     const question = await getQuestionById(id);
@@ -32,7 +34,7 @@ export async function GET(request: Request, { params }: RouteParams) {
       question 
     });
   } catch (error) {
-    console.error(`Error fetching question ${params.id}:`, error);
+    console.error('Error fetching question:', error);
     return NextResponse.json(
       { success: false, error: 'Failed to fetch question' },
       { status: 500 }
@@ -41,9 +43,12 @@ export async function GET(request: Request, { params }: RouteParams) {
 }
 
 // PATCH /api/questions/[id] - Update a question
-export async function PATCH(request: Request, { params }: RouteParams) {
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
   try {
-    const { id } = params;
+    const id = params.id;
     const body = await request.json();
     await connectToDatabase();
     
@@ -61,7 +66,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
       question: updatedQuestion 
     });
   } catch (error) {
-    console.error(`Error updating question ${params.id}:`, error);
+    console.error('Error updating question:', error);
     return NextResponse.json(
       { success: false, error: 'Failed to update question' },
       { status: 500 }
@@ -70,9 +75,12 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 }
 
 // DELETE /api/questions/[id] - Delete a question
-export async function DELETE(request: Request, { params }: RouteParams) {
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
   try {
-    const { id } = params;
+    const id = params.id;
     await connectToDatabase();
     
     const success = await deleteQuestion(id);

@@ -29,8 +29,12 @@ export type Question = {
   updatedAt: string // ISO
 }
 
-const STORAGE_KEY = "questions-v2" // bumped to v2 to include order/options
+// MongoDB is now used for storage, no need for local storage key
+// This constant is kept for reference only
+// const STORAGE_KEY = "questions-v2" // bumped to v2 to include order/options
 
+// Sample data structure for reference - not used in the actual application
+// since all data comes from MongoDB
 const SEED: Question[] = [
   {
     id: "Q-1234",
@@ -86,41 +90,31 @@ const SEED: Question[] = [
   },
 ]
 
-function loadInitial(): Question[] {
-  if (typeof window === "undefined") return SEED
-  const raw = localStorage.getItem(STORAGE_KEY)
-  if (!raw) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(SEED))
-    return SEED
-  }
-  try {
-    const parsed = JSON.parse(raw) as Question[]
-    return Array.isArray(parsed) ? parsed : SEED
-  } catch {
-    return SEED
-  }
-}
+// Remove localStorage functions as we're now using MongoDB exclusively
+// Note: SEED data is maintained as a reference but will not be used
 
-function saveAll(list: Question[]) {
-  if (typeof window === "undefined") return
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(list))
-}
-
-// This function will be used when we transition to MongoDB
+// Load questions from database
 async function loadFromDb(): Promise<Question[]> {
-  if (typeof window === "undefined") return SEED
+  if (typeof window === "undefined") return []
   
   try {
+    console.log('Fetching questions from MongoDB...');
     const response = await fetch('/api/questions');
     if (!response.ok) {
-      throw new Error('Failed to fetch questions');
+      throw new Error(`Failed to fetch questions: ${response.statusText}`);
     }
     const data = await response.json();
-    return data.questions;
+    console.log('Questions loaded from MongoDB:', data);
+    
+    // Check if response has the expected structure
+    if (!data.success) {
+      throw new Error('API returned unsuccessful response');
+    }
+    
+    return data.questions || [];
   } catch (error) {
     console.error('Error loading questions from DB:', error);
-    // Fallback to localStorage
-    return loadInitial();
+    return [];
   }
 }
 
@@ -130,12 +124,12 @@ function nextOrder(list: Question[]) {
 
 type QuestionsContextValue = {
   questions: Question[]
-  addBlank(): Question
-  duplicate(id: string): Question | undefined
-  update(id: string, patch: Partial<Question>): void
-  remove(id: string): void
-  bulkUpdate(ids: string[], patch: Partial<Question>): void
-  reorderQuestions(newOrderIds: string[]): void
+  addBlank(): Promise<Question>
+  duplicate(id: string): Promise<Question | undefined>
+  update(id: string, patch: Partial<Question>): Promise<void>
+  remove(id: string): Promise<void>
+  bulkUpdate(ids: string[], patch: Partial<Question>): Promise<void>
+  reorderQuestions(newOrderIds: string[]): Promise<void>
   getById(id: string): Question | undefined
   refreshQuestions(): Promise<void>
 }
@@ -143,20 +137,25 @@ type QuestionsContextValue = {
 const QuestionsContext = createContext<QuestionsContextValue | null>(null)
 
 export function QuestionsProvider({ children }: { children: ReactNode }) {
-  const [questions, setQuestions] = useState<Question[]>(loadInitial)
+  const [questions, setQuestions] = useState<Question[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [isInitialized, setIsInitialized] = useState(false)
 
-  // Load questions initially from localStorage, then try to fetch from API
+  // Load questions from MongoDB on component mount
   useEffect(() => {
     const fetchFromApi = async () => {
+      setLoading(true);
       try {
         const apiQuestions = await loadFromDb();
         setQuestions(apiQuestions);
+        setError(null);
         setIsInitialized(true);
       } catch (error) {
-        console.error('Failed to load questions from API:', error);
-        // Already loaded from localStorage in useState initialization
-        setIsInitialized(true);
+        console.error('Failed to load questions from MongoDB:', error);
+        setError('Failed to load questions. Please try again later.');
+      } finally {
+        setLoading(false);
       }
     };
 
@@ -164,11 +163,7 @@ export function QuestionsProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Sync to localStorage for backward compatibility
-  useEffect(() => {
-    if (isInitialized) {
-      saveAll(questions);
-    }
-  }, [questions, isInitialized]);
+  // This useEffect is now removed since we're using MongoDB exclusively
 
   const refreshQuestions = useCallback(async () => {
     try {
@@ -179,11 +174,11 @@ export function QuestionsProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const addBlank = useCallback((): Question => {
+  const addBlank = useCallback(async (): Promise<Question> => {
     const now = new Date().toISOString()
     const q: Question = {
       id: newQuestionId(),
-      text: "",
+      text: "New Question", // Default text to pass validation
       type: "text",
       paths: ["New Business"],
       required: false,
@@ -194,20 +189,39 @@ export function QuestionsProvider({ children }: { children: ReactNode }) {
       createdAt: now,
       updatedAt: now,
     }
-    setQuestions((prev) => [q, ...prev])
     
-    // Create in database in background
-    fetch('/api/questions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(q),
-    }).catch(err => console.error('Failed to create question in DB:', err));
-    
-    return q
+    try {
+      // Create in database
+      const response = await fetch('/api/questions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(q),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to create question: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      if (data.success && data.question) {
+        // Use the question returned from the database
+        setQuestions((prev) => [data.question, ...prev]);
+        return data.question;
+      } else {
+        // Fallback to the locally created question if API doesn't return one
+        setQuestions((prev) => [q, ...prev]);
+        return q;
+      }
+    } catch (err) {
+      console.error('Failed to create question in DB:', err);
+      // Still update the UI optimistically
+      setQuestions((prev) => [q, ...prev]);
+      return q;
+    }
   }, [questions])
 
   const duplicate = useCallback(
-    (id: string) => {
+    async (id: string): Promise<Question | undefined> => {
       const source = questions.find((q) => q.id === id)
       if (!source) return
       const now = new Date().toISOString()
@@ -220,54 +234,112 @@ export function QuestionsProvider({ children }: { children: ReactNode }) {
         text: source.text ? `${source.text} (Copy)` : "(Copy)",
         order: nextOrder(questions),
       }
-      setQuestions((prev) => [copy, ...prev])
       
-      // Create in database in background
-      fetch('/api/questions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(copy),
-      }).catch(err => console.error('Failed to duplicate question in DB:', err));
-      
-      return copy
+      try {
+        // Create in database
+        const response = await fetch('/api/questions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(copy),
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Failed to duplicate question: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        if (data.success && data.question) {
+          // Use the question returned from the database
+          setQuestions((prev) => [data.question, ...prev]);
+          return data.question;
+        } else {
+          // Fallback to the locally created question if API doesn't return one
+          setQuestions((prev) => [copy, ...prev]);
+          return copy;
+        }
+      } catch (err) {
+        console.error('Failed to duplicate question in DB:', err);
+        // Still update the UI optimistically
+        setQuestions((prev) => [copy, ...prev]);
+        return copy;
+      }
     },
     [questions],
   )
 
-  const update = useCallback((id: string, patch: Partial<Question>) => {
+  const update = useCallback(async (id: string, patch: Partial<Question>) => {
+    // Update optimistically in UI first
     setQuestions((prev) => prev.map((q) => (q.id === id ? { ...q, ...patch, updatedAt: new Date().toISOString() } : q)))
     
-    // Update in database in background
-    fetch(`/api/questions/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(patch),
-    }).catch(err => console.error(`Failed to update question ${id} in DB:`, err));
+    try {
+      // Update in database
+      const response = await fetch(`/api/questions/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to update question: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      if (data.success && data.question) {
+        // Update with the data from the server if it was returned
+        setQuestions((prev) => prev.map((q) => (q.id === id ? data.question : q)));
+      }
+    } catch (err) {
+      console.error(`Failed to update question ${id} in DB:`, err);
+      // The optimistic update is already applied, so no need to revert unless there's
+      // a specific error handling requirement
+    }
   }, [])
 
-  const remove = useCallback((id: string) => {
+  const remove = useCallback(async (id: string) => {
+    // Remove optimistically from UI first
     setQuestions((prev) => prev.filter((q) => q.id !== id))
     
-    // Delete from database in background
-    fetch(`/api/questions/${id}`, {
-      method: 'DELETE',
-    }).catch(err => console.error(`Failed to delete question ${id} from DB:`, err));
+    try {
+      // Delete from database
+      const response = await fetch(`/api/questions/${id}`, {
+        method: 'DELETE',
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to delete question: ${response.statusText}`);
+        // Could potentially restore the question in the UI here if needed
+      }
+    } catch (err) {
+      console.error(`Failed to delete question ${id} from DB:`, err);
+      // The optimistic delete is already applied, could revert here if needed
+    }
   }, [])
 
-  const bulkUpdate = useCallback((ids: string[], patch: Partial<Question>) => {
+  const bulkUpdate = useCallback(async (ids: string[], patch: Partial<Question>) => {
+    // Update optimistically in UI first
     setQuestions((prev) =>
       prev.map((q) => (ids.includes(q.id) ? { ...q, ...patch, updatedAt: new Date().toISOString() } : q)),
     )
     
-    // Bulk update in database in background
-    fetch('/api/questions', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids, patch }),
-    }).catch(err => console.error('Failed to bulk update questions in DB:', err));
+    try {
+      // Bulk update in database
+      const response = await fetch('/api/questions', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, patch }),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to bulk update questions: ${response.statusText}`);
+      }
+    } catch (err) {
+      console.error('Failed to bulk update questions in DB:', err);
+      // The optimistic update is already applied, could revert here if needed
+    }
   }, [])
 
-  const reorderQuestions = useCallback((newOrderIds: string[]) => {
+  const reorderQuestions = useCallback(async (newOrderIds: string[]) => {
+    // Update optimistically in UI first
     setQuestions((prev) => {
       const byId = new Map(prev.map((q) => [q.id, q]))
       const ordered: Question[] = []
@@ -287,13 +359,22 @@ export function QuestionsProvider({ children }: { children: ReactNode }) {
       return ordered
     })
     
-    // Update order in database in background
-    const orderMap = newOrderIds.map((id, index) => ({ id, order: index + 1 }));
-    fetch('/api/questions/reorder', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ orderMap }),
-    }).catch(err => console.error('Failed to reorder questions in DB:', err));
+    try {
+      // Update order in database
+      const orderMap = newOrderIds.map((id, index) => ({ id, order: index + 1 }));
+      const response = await fetch('/api/questions/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderMap }),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to reorder questions: ${response.statusText}`);
+      }
+    } catch (err) {
+      console.error('Failed to reorder questions in DB:', err);
+      // The optimistic update is already applied, could revert here if needed
+    }
   }, [])
 
   const getById = useCallback((id: string) => questions.find((q) => q.id === id), [questions])

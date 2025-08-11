@@ -12,10 +12,20 @@ export default function NewQuestionPage() {
   const router = useRouter()
 
   useEffect(() => {
-    const q = addBlank()
-    // Defer to allow paint of the skeleton once before redirect
-    const t = setTimeout(() => router.replace(`/questions/${q.id}/edit`), 50)
-    return () => clearTimeout(t)
+    const createQuestion = async () => {
+      try {
+        const q = await addBlank();
+        // Defer to allow paint of the skeleton once before redirect
+        const t = setTimeout(() => router.replace(`/questions/${q.id}/edit`), 50);
+        return () => clearTimeout(t);
+      } catch (error) {
+        console.error("Failed to create blank question:", error);
+        // Could redirect to questions list or show error message
+        router.replace('/questions');
+      }
+    };
+    
+    createQuestion();
   }, [addBlank, router])
 
   return (

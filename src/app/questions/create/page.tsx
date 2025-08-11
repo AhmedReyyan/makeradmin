@@ -44,6 +44,8 @@ export default function CreateQuestionPage() {
     options: [],
     order: defaultOrder,
   })
+  console.log(state);
+  
 
   const [autoPreview, setAutoPreview] = useState(true)
 
@@ -65,10 +67,45 @@ export default function CreateQuestionPage() {
     })
   }
 
-  const save = () => {
-    const q = addBlank()
-    update(q.id, { ...q, ...state, status: "draft" })
-    router.replace(`/questions/${q.id}/edit`)
+  const save = async () => {
+    try {
+      // Validate required fields before saving
+      if (!state.text.trim()) {
+        alert("Question text is required.");
+        return;
+      }
+      
+      // Create the question with all required data in one go
+      const q = await addBlank();
+      console.log("Created blank question:", q);
+      
+      // Update with the form data
+      await update(q.id, {
+        text: state.text.trim(),
+        type: state.type,
+        paths: state.paths,
+        required: state.required,
+        helpText: state.helpText,
+        options: state.options,
+        order: state.order,
+        status: "draft" as const
+      });
+      
+      // Navigate to edit page after update
+      router.replace(`/questions/${q.id}/edit`);
+    } catch (error) {
+      console.error("Failed to save question:", error);
+      
+      // Show a more detailed error message
+      let errorMessage = "Failed to save question. ";
+      if (error instanceof Error) {
+        errorMessage += error.message;
+      } else {
+        errorMessage += "Please ensure all required fields are filled.";
+      }
+      
+      alert(errorMessage);
+    }
   }
 
   return (

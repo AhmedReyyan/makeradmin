@@ -12,7 +12,7 @@ export async function POST(request: Request) {
     const bulkOps = orderMap.map(({ id, order }: { id: string; order: number }) => ({
       updateOne: {
         filter: { id },
-        update: { $set: { order, updatedAt: new Date() } }
+        update: { $set: { order, updatedAt: new Date().toISOString() } }
       }
     }));
     

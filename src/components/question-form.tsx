@@ -50,9 +50,13 @@ export function QuestionForm({ id, onSaved }: { id: string; onSaved?: () => void
   useEffect(() => {
     if (!autoPreview || !source) return
     if (debounceRef.current) window.clearTimeout(debounceRef.current)
-    debounceRef.current = window.setTimeout(() => {
-      update(source.id, { ...source, ...state })
-      setLastSavedAt(new Date().toISOString())
+    debounceRef.current = window.setTimeout(async () => {
+      try {
+        await update(source.id, { ...source, ...state })
+        setLastSavedAt(new Date().toISOString())
+      } catch (error) {
+        console.error("Failed to auto-save:", error);
+      }
     }, 400)
     return () => {
       if (debounceRef.current) window.clearTimeout(debounceRef.current)
@@ -69,18 +73,36 @@ export function QuestionForm({ id, onSaved }: { id: string; onSaved?: () => void
     })
   }
 
-  const save = () => {
-    update(source.id, { ...source, ...state })
-    setLastSavedAt(new Date().toISOString())
-    toast({ title: "Saved", description: "Changes have been saved." })
-    onSaved?.()
+  const save = async () => {
+    try {
+      await update(source.id, { ...source, ...state });
+      setLastSavedAt(new Date().toISOString());
+      toast({ title: "Saved", description: "Changes have been saved." });
+      onSaved?.();
+    } catch (error) {
+      console.error("Failed to save changes:", error);
+      toast({ 
+        title: "Error", 
+        description: "Failed to save changes. Please try again.", 
+        variant: "destructive" 
+      });
+    }
   }
 
-  const del = () => {
+  const del = async () => {
     if (!confirm("Delete this question? This action cannot be undone.")) return
-    remove(source.id)
-    toast({ title: "Question deleted" })
-    router.push("/questions")
+    try {
+      await remove(source.id);
+      toast({ title: "Question deleted" });
+      router.push("/questions");
+    } catch (error) {
+      console.error("Failed to delete question:", error);
+      toast({ 
+        title: "Error", 
+        description: "Failed to delete question. Please try again.", 
+        variant: "destructive" 
+      });
+    }
   }
 
   const onTypeChange = (t: QuestionType) => {

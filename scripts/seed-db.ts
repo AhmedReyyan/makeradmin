@@ -26,7 +26,7 @@ const QuestionSchema = new mongoose.Schema({
 
 // Model
 const QuestionModel = mongoose.models.Question || 
-  mongoose.model('Question', QuestionSchema);
+  mongoose.model('Question', QuestionSchema, 'questions');
 
 const SEED: Question[] = [
   {
@@ -85,9 +85,21 @@ const SEED: Question[] = [
 
 async function seedDatabase() {
   try {
-    // Connect to MongoDB
+    // Connect to MongoDB with appropriate options based on the connection URI
     console.log('Connecting to database...');
-    await mongoose.connect(MONGODB_URI);
+    const opts: mongoose.ConnectOptions = {};
+    
+    // Only use SSL/TLS options for Atlas clusters
+    if (MONGODB_URI.startsWith('mongodb+srv://')) {
+      Object.assign(opts, {
+        ssl: true,
+        tls: true,
+        tlsAllowInvalidCertificates: true,
+        tlsAllowInvalidHostnames: true,
+      });
+    }
+    
+    await mongoose.connect(MONGODB_URI, opts);
     console.log('Connected to MongoDB');
     
     // Delete existing questions if any
