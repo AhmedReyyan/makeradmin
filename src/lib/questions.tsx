@@ -1,17 +1,18 @@
 "use client"
 
-import React, {
+import {
   createContext,
+  createElement,
   useCallback,
   useContext,
   useEffect,
   useMemo,
   useState,
+  type ReactNode,
 } from "react"
 import { newQuestionId } from "./id"
-import { type QuestionStatus, type QuestionType } from "@/components/badges"
+import type { QuestionStatus, QuestionType } from "@/components/badges"
 
-// Domain
 export type OnboardingPath = "New Business" | "Existing Business" | "Growth Stage"
 
 export type Question = {
@@ -22,11 +23,13 @@ export type Question = {
   required: boolean
   helpText?: string
   status: QuestionStatus
+  options?: string[] // for single_select and multi_select
+  order: number // display order (1-based)
   createdAt: string // ISO
   updatedAt: string // ISO
 }
 
-const STORAGE_KEY = "questions-v1"
+const STORAGE_KEY = "questions-v2" // bumped to v2 to include order/options
 
 const SEED: Question[] = [
   {
@@ -35,9 +38,10 @@ const SEED: Question[] = [
     type: "text",
     paths: ["New Business"],
     required: true,
-    helpText:
-      "This helps us understand your business foundation and tailor recommendations.",
+    helpText: "This helps us understand your business foundation and tailor recommendations.",
     status: "active",
+    options: [],
+    order: 1,
     createdAt: "2025-01-10T10:00:00.000Z",
     updatedAt: "2025-01-15T14:56:00.000Z",
   },
@@ -49,6 +53,8 @@ const SEED: Question[] = [
     required: true,
     helpText: "",
     status: "active",
+    options: ["Technology", "Retail", "Healthcare", "Other"],
+    order: 2,
     createdAt: "2025-01-11T09:30:00.000Z",
     updatedAt: "2025-01-14T16:10:00.000Z",
   },
@@ -60,6 +66,8 @@ const SEED: Question[] = [
     required: false,
     helpText: "",
     status: "draft",
+    options: ["Subscriptions", "One-time Sales", "Ads", "Services"],
+    order: 3,
     createdAt: "2025-01-12T08:45:00.000Z",
     updatedAt: "2025-01-13T13:35:00.000Z",
   },
@@ -71,12 +79,13 @@ const SEED: Question[] = [
     required: false,
     helpText: "",
     status: "inactive",
+    options: [],
+    order: 4,
     createdAt: "2025-01-12T08:45:00.000Z",
     updatedAt: "2025-01-12T12:05:00.000Z",
   },
 ]
 
-// Local storage helpers
 function loadInitial(): Question[] {
   if (typeof window === "undefined") return SEED
   const raw = localStorage.getItem(STORAGE_KEY)
@@ -97,7 +106,10 @@ function saveAll(list: Question[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(list))
 }
 
-// Context
+function nextOrder(list: Question[]) {
+  return list.reduce((m, q) => Math.max(m, q.order), 0) + 1
+}
+
 type QuestionsContextValue = {
   questions: Question[]
   addBlank(): Question
@@ -105,15 +117,15 @@ type QuestionsContextValue = {
   update(id: string, patch: Partial<Question>): void
   remove(id: string): void
   bulkUpdate(ids: string[], patch: Partial<Question>): void
+  reorderQuestions(newOrderIds: string[]): void
   getById(id: string): Question | undefined
 }
 
 const QuestionsContext = createContext<QuestionsContextValue | null>(null)
 
-export function QuestionsProvider({ children }: { children: React.ReactNode }) {
+export function QuestionsProvider({ children }: { children: ReactNode }) {
   const [questions, setQuestions] = useState<Question[]>(loadInitial)
 
-  // keep storage in sync
   useEffect(() => {
     saveAll(questions)
   }, [questions])
@@ -128,12 +140,14 @@ export function QuestionsProvider({ children }: { children: React.ReactNode }) {
       required: false,
       helpText: "",
       status: "draft",
+      options: [],
+      order: nextOrder(questions),
       createdAt: now,
       updatedAt: now,
     }
     setQuestions((prev) => [q, ...prev])
     return q
-  }, [])
+  }, [questions])
 
   const duplicate = useCallback(
     (id: string) => {
@@ -147,6 +161,7 @@ export function QuestionsProvider({ children }: { children: React.ReactNode }) {
         createdAt: now,
         updatedAt: now,
         text: source.text ? `${source.text} (Copy)` : "(Copy)",
+        order: nextOrder(questions),
       }
       setQuestions((prev) => [copy, ...prev])
       return copy
@@ -155,11 +170,7 @@ export function QuestionsProvider({ children }: { children: React.ReactNode }) {
   )
 
   const update = useCallback((id: string, patch: Partial<Question>) => {
-    setQuestions((prev) =>
-      prev.map((q) =>
-        q.id === id ? { ...q, ...patch, updatedAt: new Date().toISOString() } : q,
-      ),
-    )
+    setQuestions((prev) => prev.map((q) => (q.id === id ? { ...q, ...patch, updatedAt: new Date().toISOString() } : q)))
   }, [])
 
   const remove = useCallback((id: string) => {
@@ -168,25 +179,39 @@ export function QuestionsProvider({ children }: { children: React.ReactNode }) {
 
   const bulkUpdate = useCallback((ids: string[], patch: Partial<Question>) => {
     setQuestions((prev) =>
-      prev.map((q) =>
-        ids.includes(q.id)
-          ? { ...q, ...patch, updatedAt: new Date().toISOString() }
-          : q,
-      ),
+      prev.map((q) => (ids.includes(q.id) ? { ...q, ...patch, updatedAt: new Date().toISOString() } : q)),
     )
   }, [])
 
-  const getById = useCallback(
-    (id: string) => questions.find((q) => q.id === id),
-    [questions],
-  )
+  const reorderQuestions = useCallback((newOrderIds: string[]) => {
+    setQuestions((prev) => {
+      const byId = new Map(prev.map((q) => [q.id, q]))
+      const ordered: Question[] = []
+      let n = 1
+      for (const id of newOrderIds) {
+        const q = byId.get(id)
+        if (!q) continue
+        ordered.push({ ...q, order: n, updatedAt: new Date().toISOString() })
+        byId.delete(id)
+        n++
+      }
+      const rest = Array.from(byId.values()).sort((a, b) => a.order - b.order)
+      for (const q of rest) {
+        ordered.push({ ...q, order: n, updatedAt: new Date().toISOString() })
+        n++
+      }
+      return ordered
+    })
+  }, [])
+
+  const getById = useCallback((id: string) => questions.find((q) => q.id === id), [questions])
 
   const value = useMemo<QuestionsContextValue>(
-    () => ({ questions, addBlank, duplicate, update, remove, bulkUpdate, getById }),
-    [questions, addBlank, duplicate, update, remove, bulkUpdate, getById],
+    () => ({ questions, addBlank, duplicate, update, remove, bulkUpdate, reorderQuestions, getById }),
+    [questions, addBlank, duplicate, update, remove, bulkUpdate, reorderQuestions, getById],
   )
 
-  return <QuestionsContext.Provider value={value}>{children}</QuestionsContext.Provider>
+  return createElement(QuestionsContext.Provider, { value }, children as any)
 }
 
 export function useQuestions() {
@@ -195,7 +220,6 @@ export function useQuestions() {
   return ctx
 }
 
-// Utilities
 export function formatRelative(iso: string) {
   const ts = new Date(iso).getTime()
   const now = Date.now()
