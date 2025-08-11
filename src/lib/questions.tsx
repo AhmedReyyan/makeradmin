@@ -24,6 +24,7 @@ export type Question = {
   status: QuestionStatus
   createdAt: string // ISO
   updatedAt: string // ISO
+  options?: string[] // Options for single_select and multi_select questions
 }
 
 const STORAGE_KEY = "questions-v1"
@@ -51,6 +52,7 @@ const SEED: Question[] = [
     status: "active",
     createdAt: "2025-01-11T09:30:00.000Z",
     updatedAt: "2025-01-14T16:10:00.000Z",
+    options: ["Technology", "Retail", "Healthcare", "Finance", "Education", "Manufacturing"]
   },
   {
     id: "Q-3236",
@@ -62,6 +64,7 @@ const SEED: Question[] = [
     status: "draft",
     createdAt: "2025-01-12T08:45:00.000Z",
     updatedAt: "2025-01-13T13:35:00.000Z",
+    options: ["Product Sales", "Services", "Subscriptions", "Advertising", "Licensing", "Affiliate Marketing"]
   },
   {
     id: "Q-4237",
@@ -130,6 +133,7 @@ export function QuestionsProvider({ children }: { children: React.ReactNode }) {
       status: "draft",
       createdAt: now,
       updatedAt: now,
+      options: []
     }
     setQuestions((prev) => [q, ...prev])
     return q

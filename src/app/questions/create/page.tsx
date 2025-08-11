@@ -24,6 +24,7 @@ type DraftState = {
   paths: OnboardingPath[]
   required: boolean
   helpText: string
+  options: string[]
 }
 
 export default function CreateQuestionPage() {
@@ -36,6 +37,7 @@ export default function CreateQuestionPage() {
     paths: ["New Business"],
     required: false,
     helpText: "This helps us understand your business foundation and tailor recommendations.",
+    options: [],
   })
   const [autoPreview, setAutoPreview] = useState(true)
 
@@ -54,6 +56,10 @@ export default function CreateQuestionPage() {
       ...q,
       ...state,
       status: "draft",
+      // Add options for select question types
+      options: (state.type === "single_select" || state.type === "multi_select") 
+        ? state.options 
+        : undefined
     })
     router.replace(`/questions/${q.id}/edit`)
   }
@@ -99,7 +105,13 @@ export default function CreateQuestionPage() {
               <Label>Question Type</Label>
               <Select
                 value={state.type}
-                onValueChange={(v: QuestionType) => setState((s) => ({ ...s, type: v }))}
+                onValueChange={(v: QuestionType) => {
+                  setState((s) => ({
+                    ...s,
+                    type: v,
+                    options: v === "single_select" || v === "multi_select" ? ["Option 1"] : [],
+                  }))
+                }}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Select a type" />
@@ -115,6 +127,54 @@ export default function CreateQuestionPage() {
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Options input for single_select and multi_select */}
+            {(state.type === "single_select" || state.type === "multi_select") && (
+              <div className="grid gap-2 mt-4">
+                <Label>Options</Label>
+                <div className="flex flex-col gap-2">
+                  {state.options.map((opt, idx) => (
+                    <div key={idx} className="flex gap-2 items-center">
+                      <Input
+                        value={opt}
+                        onChange={e => {
+                          const val = e.target.value
+                          setState(s => {
+                            const options = [...s.options]
+                            options[idx] = val
+                            return { ...s, options }
+                          })
+                        }}
+                        placeholder={`Option ${idx + 1}`}
+                        className="w-full"
+                      />
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => {
+                          setState(s => ({
+                            ...s,
+                            options: s.options.filter((_, i) => i !== idx)
+                          }))
+                        }}
+                        aria-label="Remove option"
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  ))}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setState(s => ({ ...s, options: [...s.options, `Option ${s.options.length + 1}`] }))}
+                  >
+                    Add Option
+                  </Button>
+                </div>
+                <div className="text-xs text-muted-foreground">Options users can select from</div>
+              </div>
+            )}
+           
 
             <div className="grid gap-2">
               <Label>Onboarding Paths</Label>
@@ -196,6 +256,7 @@ export default function CreateQuestionPage() {
                   type: state.type,
                   helpText: state.helpText,
                   required: state.required,
+                  options: state.options
                 }}
                 currentPath={state.paths[0]}
               />

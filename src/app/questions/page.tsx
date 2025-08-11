@@ -24,7 +24,14 @@ export default function QuestionsManagementPage() {
   return (
     <PageShell
       title="Questions Management"
-      right={<AddQuestionButton />}
+      right={
+        <div className="flex space-x-2">
+          <Button size="sm" variant="outline" asChild>
+            <Link href="/questions/preview">Preview Flow</Link>
+          </Button>
+          <AddQuestionButton />
+        </div>
+      }
     >
       <QuestionsTable />
       {/* Screen reader only reference images for design parity */}
@@ -62,7 +69,7 @@ function QuestionsTable() {
     let rows = questions.slice()
     if (query.trim()) {
       const q = query.trim().toLowerCase()
-      rows = rows.filter(r => r.text.toLowerCase().includes(q) || r.id.toLowerCase().includes(q))
+      rows = rows.filter((r:any) => r.text.toLowerCase().includes(q) || r.id.toLowerCase().includes(q))
     }
     if (pathFilter !== "all") rows = rows.filter(r => r.paths.includes(pathFilter))
     if (typeFilter !== "all") rows = rows.filter(r => r.type === typeFilter)
@@ -81,7 +88,7 @@ function QuestionsTable() {
   const allSelectedOnPage = pageRows.length > 0 && pageRows.every(r => selected.includes(r.id))
 
   const toggleAllOnPage = (checked: boolean) => {
-    const ids = pageRows.map(r => r.id)
+    const ids = pageRows.map(r  => r.id)
     setSelected(prev => {
       if (checked) {
         const merged = new Set([...prev, ...ids])
@@ -91,6 +98,8 @@ function QuestionsTable() {
       }
     })
   }
+  console.log("Selected IDs:", selected)
+  console.log("Selected IDs:", )
 
   const bulk = {
     activate: () => {
@@ -207,6 +216,7 @@ function QuestionsTable() {
             </TableHeader>
             <TableBody>
               {pageRows.map(row => {
+                console.log("Rendering row:", row)
                 const checked = selected.includes(row.id)
                 return (
                   <TableRow key={row.id} className="align-top">
