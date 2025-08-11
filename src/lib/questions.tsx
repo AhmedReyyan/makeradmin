@@ -106,6 +106,24 @@ function saveAll(list: Question[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(list))
 }
 
+// This function will be used when we transition to MongoDB
+async function loadFromDb(): Promise<Question[]> {
+  if (typeof window === "undefined") return SEED
+  
+  try {
+    const response = await fetch('/api/questions');
+    if (!response.ok) {
+      throw new Error('Failed to fetch questions');
+    }
+    const data = await response.json();
+    return data.questions;
+  } catch (error) {
+    console.error('Error loading questions from DB:', error);
+    // Fallback to localStorage
+    return loadInitial();
+  }
+}
+
 function nextOrder(list: Question[]) {
   return list.reduce((m, q) => Math.max(m, q.order), 0) + 1
 }
@@ -119,16 +137,47 @@ type QuestionsContextValue = {
   bulkUpdate(ids: string[], patch: Partial<Question>): void
   reorderQuestions(newOrderIds: string[]): void
   getById(id: string): Question | undefined
+  refreshQuestions(): Promise<void>
 }
 
 const QuestionsContext = createContext<QuestionsContextValue | null>(null)
 
 export function QuestionsProvider({ children }: { children: ReactNode }) {
   const [questions, setQuestions] = useState<Question[]>(loadInitial)
+  const [isInitialized, setIsInitialized] = useState(false)
 
+  // Load questions initially from localStorage, then try to fetch from API
   useEffect(() => {
-    saveAll(questions)
-  }, [questions])
+    const fetchFromApi = async () => {
+      try {
+        const apiQuestions = await loadFromDb();
+        setQuestions(apiQuestions);
+        setIsInitialized(true);
+      } catch (error) {
+        console.error('Failed to load questions from API:', error);
+        // Already loaded from localStorage in useState initialization
+        setIsInitialized(true);
+      }
+    };
+
+    fetchFromApi();
+  }, []);
+
+  // Sync to localStorage for backward compatibility
+  useEffect(() => {
+    if (isInitialized) {
+      saveAll(questions);
+    }
+  }, [questions, isInitialized]);
+
+  const refreshQuestions = useCallback(async () => {
+    try {
+      const apiQuestions = await loadFromDb();
+      setQuestions(apiQuestions);
+    } catch (error) {
+      console.error('Failed to refresh questions:', error);
+    }
+  }, []);
 
   const addBlank = useCallback((): Question => {
     const now = new Date().toISOString()
@@ -146,6 +195,14 @@ export function QuestionsProvider({ children }: { children: ReactNode }) {
       updatedAt: now,
     }
     setQuestions((prev) => [q, ...prev])
+    
+    // Create in database in background
+    fetch('/api/questions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(q),
+    }).catch(err => console.error('Failed to create question in DB:', err));
+    
     return q
   }, [questions])
 
@@ -164,6 +221,14 @@ export function QuestionsProvider({ children }: { children: ReactNode }) {
         order: nextOrder(questions),
       }
       setQuestions((prev) => [copy, ...prev])
+      
+      // Create in database in background
+      fetch('/api/questions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(copy),
+      }).catch(err => console.error('Failed to duplicate question in DB:', err));
+      
       return copy
     },
     [questions],
@@ -171,16 +236,35 @@ export function QuestionsProvider({ children }: { children: ReactNode }) {
 
   const update = useCallback((id: string, patch: Partial<Question>) => {
     setQuestions((prev) => prev.map((q) => (q.id === id ? { ...q, ...patch, updatedAt: new Date().toISOString() } : q)))
+    
+    // Update in database in background
+    fetch(`/api/questions/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }).catch(err => console.error(`Failed to update question ${id} in DB:`, err));
   }, [])
 
   const remove = useCallback((id: string) => {
     setQuestions((prev) => prev.filter((q) => q.id !== id))
+    
+    // Delete from database in background
+    fetch(`/api/questions/${id}`, {
+      method: 'DELETE',
+    }).catch(err => console.error(`Failed to delete question ${id} from DB:`, err));
   }, [])
 
   const bulkUpdate = useCallback((ids: string[], patch: Partial<Question>) => {
     setQuestions((prev) =>
       prev.map((q) => (ids.includes(q.id) ? { ...q, ...patch, updatedAt: new Date().toISOString() } : q)),
     )
+    
+    // Bulk update in database in background
+    fetch('/api/questions', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, patch }),
+    }).catch(err => console.error('Failed to bulk update questions in DB:', err));
   }, [])
 
   const reorderQuestions = useCallback((newOrderIds: string[]) => {
@@ -202,13 +286,31 @@ export function QuestionsProvider({ children }: { children: ReactNode }) {
       }
       return ordered
     })
+    
+    // Update order in database in background
+    const orderMap = newOrderIds.map((id, index) => ({ id, order: index + 1 }));
+    fetch('/api/questions/reorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderMap }),
+    }).catch(err => console.error('Failed to reorder questions in DB:', err));
   }, [])
 
   const getById = useCallback((id: string) => questions.find((q) => q.id === id), [questions])
 
   const value = useMemo<QuestionsContextValue>(
-    () => ({ questions, addBlank, duplicate, update, remove, bulkUpdate, reorderQuestions, getById }),
-    [questions, addBlank, duplicate, update, remove, bulkUpdate, reorderQuestions, getById],
+    () => ({ 
+      questions, 
+      addBlank, 
+      duplicate, 
+      update, 
+      remove, 
+      bulkUpdate, 
+      reorderQuestions, 
+      getById,
+      refreshQuestions 
+    }),
+    [questions, addBlank, duplicate, update, remove, bulkUpdate, reorderQuestions, getById, refreshQuestions],
   )
 
   return createElement(QuestionsContext.Provider, { value }, children as any)
