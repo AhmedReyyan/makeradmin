@@ -43,7 +43,7 @@ const STATS: Stat[] = [
 ]
 
 const QUICK_ACCESS: QuickItem[] = [
-  { id: "questions", label: "Questions", href: "#", icon: MessageSquare },
+  { id: "questions", label: "Questions", href: "/questions", icon: MessageSquare },
   { id: "users", label: "Users", href: "#", icon: Users },
   { id: "reports", label: "Business Profile", href: "#", icon: FileText },
   { id: "settings", label: "Settings", href: "#", icon: SettingsIcon },
@@ -77,7 +77,12 @@ function StatCard({ stat }: { stat: Stat }) {
   return (
     <Card className="shadow-sm">
       <CardContent className="flex items-center gap-3 p-4">
-        <div
+       
+        <div className="flex-1">
+          <div className="text-xs text-muted-foreground">{stat.label}</div>
+          <div className="text-lg font-semibold leading-tight">{stat.value}</div>
+        </div>
+         <div
           className={cn(
             "flex size-10 shrink-0 items-center justify-center rounded-full border",
             stat.tone === "success" && "bg-emerald-50 text-emerald-700 border-emerald-100",
@@ -89,15 +94,11 @@ function StatCard({ stat }: { stat: Stat }) {
         >
           <Icon className="size-4" />
         </div>
-        <div className="flex-1">
-          <div className="text-xs text-muted-foreground">{stat.label}</div>
-          <div className="text-lg font-semibold leading-tight">{stat.value}</div>
-        </div>
         {/* Decorative ring to mimic small progress dot from the mock */}
-        <div className="relative">
+        {/* <div className="relative">
           <span className="block size-8 rounded-full border border-muted-foreground/20" aria-hidden="true" />
           <span className="absolute right-0 top-1/2 -translate-y-1/2 block size-1.5 rounded-full bg-muted-foreground/70" />
-        </div>
+        </div> */}
       </CardContent>
     </Card>
   )
@@ -189,8 +190,9 @@ export default async function Page() {
       title="Admin Dashboard"
       actions={
         <div className="flex items-center gap-2">
-          <Button size="sm" className="hidden sm:inline-flex">Add Queries</Button>
-          <Button size="sm" variant="outline" className="hidden sm:inline-flex">Manage Users</Button>
+<Button size="sm" asChild>
+            <Link href="/questions/create">Add Question</Link>
+          </Button>          <Button size="sm" variant="outline" className="hidden sm:inline-flex">Manage Users</Button>
           <Avatar className="size-8 border">
             <AvatarImage src="/admin-avatar.png" alt="Admin" />
             <AvatarFallback>AD</AvatarFallback>

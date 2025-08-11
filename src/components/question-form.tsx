@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
@@ -9,13 +9,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
-import { Eye, Save, Trash2 } from 'lucide-react'
+import { Save, Trash2 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
-import type { OnboardingPath, Question } from "@/lib/questions"
+import type { OnboardingPath } from "@/lib/questions"
 import { PATH_COUNTS, useQuestions } from "@/lib/questions"
 import type { QuestionType } from "@/components/badges"
 import { formatTypeLabel } from "@/components/badges"
+import { QuestionPreview } from "@/components/question-preview"
+import { OptionEditor } from "@/components/option-editor"
 
 type EditState = {
   text: string
@@ -23,6 +25,7 @@ type EditState = {
   paths: OnboardingPath[]
   required: boolean
   helpText: string
+  options: string[]
 }
 
 export function QuestionForm({
@@ -43,6 +46,7 @@ export function QuestionForm({
     paths: source?.paths ?? ["New Business"],
     required: source?.required ?? false,
     helpText: source?.helpText ?? "",
+    options: source?.options ?? [],
   }))
 
   const [autoPreview, setAutoPreview] = useState(true)
@@ -51,8 +55,7 @@ export function QuestionForm({
 
   // Autosave on changes with small debounce
   useEffect(() => {
-    if (!autoPreview) return
-    if (!source) return
+    if (!autoPreview || !source) return
     if (debounceRef.current) window.clearTimeout(debounceRef.current)
     debounceRef.current = window.setTimeout(() => {
       update(source.id, { ...source, ...state })
@@ -68,9 +71,9 @@ export function QuestionForm({
   }
 
   const togglePath = (p: OnboardingPath) => {
-    setState(s => {
+    setState((s) => {
       const has = s.paths.includes(p)
-      const next = has ? s.paths.filter(x => x !== p) : [...s.paths, p]
+      const next = has ? s.paths.filter((x) => x !== p) : [...s.paths, p]
       return { ...s, paths: next }
     })
   }
@@ -89,6 +92,16 @@ export function QuestionForm({
     router.push("/questions")
   }
 
+  const onTypeChange = (t: QuestionType) => {
+    setState((s) => {
+      const ensureOptions =
+        (t === "single_select" || t === "multi_select") && (!s.options || s.options.length === 0)
+          ? ["Option 1", "Option 2"]
+          : s.options
+      return { ...s, type: t, options: ensureOptions }
+    })
+  }
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       {/* Left: Form */}
@@ -102,7 +115,7 @@ export function QuestionForm({
             <Textarea
               id="qtext"
               value={state.text}
-              onChange={(e) => setState(s => ({ ...s, text: e.target.value }))}
+              onChange={(e) => setState((s) => ({ ...s, text: e.target.value }))}
               placeholder="What is your primary business idea or concept?"
               className="min-h-[96px]"
               maxLength={500}
@@ -112,20 +125,27 @@ export function QuestionForm({
 
           <div className="grid gap-2">
             <Label>Question Type</Label>
-            <Select
-              value={state.type}
-              onValueChange={(v: QuestionType) => setState(s => ({ ...s, type: v }))}
-            >
+            <Select value={state.type} onValueChange={onTypeChange as any}>
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Select a type" />
               </SelectTrigger>
               <SelectContent>
-                {(["text", "single_select", "multi_select", "date"] as QuestionType[]).map(t => (
-                  <SelectItem key={t} value={t}>{formatTypeLabel(t)}</SelectItem>
+                {(["text", "single_select", "multi_select", "date"] as QuestionType[]).map((t) => (
+                  <SelectItem key={t} value={t}>
+                    {formatTypeLabel(t)}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
+
+          {(state.type === "single_select" || state.type === "multi_select") && (
+            <OptionEditor
+              options={state.options}
+              onChange={(opts) => setState((s) => ({ ...s, options: opts }))}
+              typeLabel={state.type === "single_select" ? "Option" : "Option"}
+            />
+          )}
 
           <div className="grid gap-2">
             <Label>Onboarding Paths</Label>
@@ -138,7 +158,9 @@ export function QuestionForm({
                       checked={state.paths.includes(p)}
                       onCheckedChange={() => togglePath(p)}
                     />
-                    <Label htmlFor={`path-${i}`} className="text-sm font-normal">{p}</Label>
+                    <Label htmlFor={`path-${i}`} className="text-sm font-normal">
+                      {p}
+                    </Label>
                   </div>
                   <span className="text-xs text-muted-foreground">{PATH_COUNTS[p]} users</span>
                 </div>
@@ -153,7 +175,7 @@ export function QuestionForm({
             </div>
             <Switch
               checked={state.required}
-              onCheckedChange={(v) => setState(s => ({ ...s, required: !!v }))}
+              onCheckedChange={(v) => setState((s) => ({ ...s, required: !!v }))}
               aria-label="Required question"
             />
           </div>
@@ -163,7 +185,7 @@ export function QuestionForm({
             <Input
               id="help"
               value={state.helpText}
-              onChange={(e) => setState(s => ({ ...s, helpText: e.target.value }))}
+              onChange={(e) => setState((s) => ({ ...s, helpText: e.target.value }))}
               placeholder="This helps us understand your business foundation and tailor recommendations."
             />
             <div className="text-xs text-muted-foreground">
@@ -201,6 +223,7 @@ export function QuestionForm({
                 type: state.type,
                 helpText: state.helpText,
                 required: state.required,
+                options: state.options,
               }}
               currentPath={state.paths[0]}
             />
@@ -211,7 +234,9 @@ export function QuestionForm({
           <CardContent className="flex items-center justify-between p-4">
             <div className="flex items-center gap-2">
               <Switch checked={autoPreview} onCheckedChange={(v) => setAutoPreview(!!v)} id="auto" />
-              <label htmlFor="auto" className="text-sm">Preview updates automatically as you edit</label>
+              <label htmlFor="auto" className="text-sm">
+                Preview updates automatically as you edit
+              </label>
             </div>
             {lastSavedAt ? (
               <div className="text-xs text-muted-foreground">Auto-saved just now</div>
@@ -222,67 +247,5 @@ export function QuestionForm({
         </Card>
       </div>
     </div>
-  )
-}
-
-// Inline import to avoid circular dependency
-function QuestionPreview({
-  question,
-  currentPath,
-}: {
-  question: Pick<Question, "text" | "type" | "helpText" | "required">
-  currentPath?: OnboardingPath
-}) {
-  const { Card, CardContent, CardHeader, CardTitle } = require("@/components/ui/card")
-  const { Badge } = require("@/components/ui/badge")
-  const { Button } = require("@/components/ui/button")
-  const { Info } = require("lucide-react")
-  return (
-    <Card className="shadow-sm">
-      <CardHeader className="pb-0">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-base">Question 1 of 12</CardTitle>
-          <Badge variant="outline" className="bg-muted text-muted-foreground">
-            {currentPath ?? "New Business"} Path
-          </Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="p-4">
-        <div className="mb-2 text-[15px] font-medium">
-          {question.text || "What is your primary business idea or concept?"}
-          {question.required ? " *" : ""}
-        </div>
-        <div className="rounded-md border bg-background p-0">
-          <textarea
-            readOnly
-            placeholder="Describe your business idea in detail..."
-            className="h-28 w-full resize-none rounded-md bg-transparent p-3 outline-none"
-          />
-        </div>
-        {question.helpText ? (
-          <div className="mt-3 flex items-start gap-2 text-sm text-muted-foreground">
-            <Info className="mt-0.5 size-4" />
-            <span>{question.helpText}</span>
-          </div>
-        ) : (
-          <div className="mt-3 flex items-start gap-2 text-sm text-muted-foreground">
-            <Info className="mt-0.5 size-4" />
-            <span>This helps us understand your business foundation and tailor recommendations.</span>
-          </div>
-        )}
-
-        <div className="mt-4 flex items-center justify-between">
-          <Button variant="outline" size="sm">Previous</Button>
-          <div className="flex items-center gap-1" aria-label="Progress indicators">
-            <span className="size-1.5 rounded-full bg-muted-foreground/40" />
-            <span className="size-1.5 rounded-full bg-muted-foreground/40" />
-            <span className="size-1.5 rounded-full bg-muted-foreground/90" />
-            <span className="size-1.5 rounded-full bg-muted-foreground/40" />
-            <span className="size-1.5 rounded-full bg-muted-foreground/40" />
-          </div>
-          <Button size="sm">Next</Button>
-        </div>
-      </CardContent>
-    </Card>
   )
 }
