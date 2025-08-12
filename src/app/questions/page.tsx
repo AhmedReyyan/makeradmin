@@ -1,6 +1,6 @@
 "use client"
 
-import Link from "next/link"
+import type React from "react"
 import { useEffect, useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -9,28 +9,50 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { ChevronLeft, ChevronRight, Copy, Eye, GripVertical, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Copy, Eye, GripVertical, Pencil, Trash2, Loader2 } from "lucide-react"
 import { PageShell } from "@/components/page-shell"
 import { StatusBadge, TypeBadge } from "@/components/badges"
-import { PATH_COUNTS, useQuestions, type OnboardingPath } from "@/lib/questions"
-import type { QuestionStatus } from "@/components/badges"
-import type { QuestionType } from "@/components/badges"
+import { useQuestions, type OnboardingPath } from "@/lib/questions"
+import type { QuestionStatus, QuestionType } from "@/components/badges"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
 
 const PAGE_SIZE = 10
 
 export default function QuestionsManagementPage() {
+  const { loading, error } = useQuestions()
+
+  if (loading) {
+    return (
+      <PageShell title="Questions Management" right={<AddQuestionButton />}>
+        <Card className="shadow-sm">
+          <CardContent className="flex items-center justify-center p-8">
+            <Loader2 className="size-6 animate-spin mr-2" />
+            <span>Loading questions...</span>
+          </CardContent>
+        </Card>
+      </PageShell>
+    )
+  }
+
+  if (error) {
+    return (
+      <PageShell title="Questions Management" right={<AddQuestionButton />}>
+        <Card className="shadow-sm">
+          <CardContent className="flex items-center justify-center p-8">
+            <div className="text-center">
+              <p className="text-red-600 mb-2">Error loading questions</p>
+              <p className="text-sm text-muted-foreground">{error}</p>
+            </div>
+          </CardContent>
+        </Card>
+      </PageShell>
+    )
+  }
+
   return (
-    <PageShell
-      title="Questions Management"
-      right={<AddQuestionButton />}
-    >
+    <PageShell title="Questions Management" right={<AddQuestionButton />}>
       <QuestionsTable />
-      {/* Screen reader only reference images for design parity */}
-      <div className="sr-only">
-        <img src="/images/questions-management-reference.png" alt="Reference Questions Management" />
-      </div>
     </PageShell>
   )
 }
@@ -44,7 +66,7 @@ function AddQuestionButton() {
 }
 
 function QuestionsTable() {
-  const { questions, duplicate, remove, bulkUpdate } = useQuestions()
+  const { questions, duplicate, remove, bulkUpdate, reorderQuestions } = useQuestions()
   const router = useRouter()
   const { toast } = useToast()
 
@@ -52,153 +74,220 @@ function QuestionsTable() {
   const [pathFilter, setPathFilter] = useState<"all" | OnboardingPath>("all")
   const [typeFilter, setTypeFilter] = useState<"all" | QuestionType>("all")
   const [statusFilter, setStatusFilter] = useState<"all" | QuestionStatus>("all")
-  const [sort, setSort] = useState<"modified-desc" | "modified-asc">("modified-desc")
+  const [sort, setSort] = useState<"modified-desc" | "modified-asc" | "display-asc">("modified-desc")
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState<string[]>([])
+  const [reorderMode, setReorderMode] = useState(false)
+  const [dragId, setDragId] = useState<string | null>(null)
 
-  useEffect(() => setPage(1), [query, pathFilter, typeFilter, statusFilter])
+  useEffect(() => setPage(1), [query, pathFilter, typeFilter, statusFilter, sort])
 
-  const filtered = useMemo(() => {
-    let rows = questions.slice()
-    if (query.trim()) {
-      const q = query.trim().toLowerCase()
-      rows = rows.filter(r => r.text.toLowerCase().includes(q) || r.id.toLowerCase().includes(q))
+  const baseSorted = useMemo(() => {
+    if (reorderMode || sort === "display-asc") {
+      return [...questions].sort((a, b) => a.order - b.order)
     }
-    if (pathFilter !== "all") rows = rows.filter(r => r.paths.includes(pathFilter))
-    if (typeFilter !== "all") rows = rows.filter(r => r.type === typeFilter)
-    if (statusFilter !== "all") rows = rows.filter(r => r.status === statusFilter)
+    const rows = [...questions]
     rows.sort((a, b) => {
       const da = new Date(a.updatedAt).getTime()
       const db = new Date(b.updatedAt).getTime()
       return sort === "modified-desc" ? db - da : da - db
     })
     return rows
-  }, [questions, query, pathFilter, typeFilter, statusFilter, sort])
+  }, [questions, sort, reorderMode])
+
+  const filtered = useMemo(() => {
+    let rows = baseSorted
+    if (!reorderMode) {
+      if (query.trim()) {
+        const q = query.trim().toLowerCase()
+        rows = rows.filter((r) => r.text.toLowerCase().includes(q) || r.id.toLowerCase().includes(q))
+      }
+      if (pathFilter !== "all") rows = rows.filter((r) => r.paths.includes(pathFilter))
+      if (typeFilter !== "all") rows = rows.filter((r) => r.type === typeFilter)
+      if (statusFilter !== "all") rows = rows.filter((r) => r.status === statusFilter)
+    }
+    return rows
+  }, [baseSorted, pathFilter, typeFilter, statusFilter, query, reorderMode])
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
-  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  const pageRows = reorderMode ? filtered : filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
-  const allSelectedOnPage = pageRows.length > 0 && pageRows.every(r => selected.includes(r.id))
+  const onDragStart = (id: string) => setDragId(id)
+  const onDragOver = (e: React.DragEvent<HTMLTableRowElement>) => e.preventDefault()
+  const onDrop = async (overId: string) => {
+    if (!dragId || dragId === overId) return
+    const ids = filtered.map((r) => r.id)
+    const from = ids.indexOf(dragId)
+    const to = ids.indexOf(overId)
+    if (from < 0 || to < 0) return
+    const next = [...ids]
+    const [moved] = next.splice(from, 1)
+    next.splice(to, 0, moved)
 
+    try {
+      await reorderQuestions(next)
+      toast({ title: "Order updated", description: "Questions have been reordered." })
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to reorder questions",
+        // variant: "destructive",
+      })
+    }
+    setDragId(null)
+  }
+
+  const allSelectedOnPage = !reorderMode && pageRows.length > 0 && pageRows.every((r) => selected.includes(r.id))
   const toggleAllOnPage = (checked: boolean) => {
-    const ids = pageRows.map(r => r.id)
-    setSelected(prev => {
-      if (checked) {
-        const merged = new Set([...prev, ...ids])
-        return Array.from(merged)
-      } else {
-        return prev.filter(id => !ids.includes(id))
-      }
+    const ids = pageRows.map((r) => r.id)
+    setSelected((prev) => {
+      if (checked) return Array.from(new Set([...prev, ...ids]))
+      return prev.filter((id) => !ids.includes(id))
     })
   }
 
   const bulk = {
-    activate: () => {
+    activate: async () => {
       if (!selected.length) return
-      bulkUpdate(selected, { status: "active" })
-      toast({ title: "Activated", description: `${selected.length} question(s) activated.` })
-      setSelected([])
+      try {
+        await bulkUpdate(selected, { status: "active" })
+        toast({ title: "Activated", description: `${selected.length} question(s) activated.` })
+        setSelected([])
+      } catch (error) {
+        toast({
+          title: "Error",
+          description: error instanceof Error ? error.message : "Failed to activate questions",
+          // variant: "destructive",
+        })
+      }
     },
-    deactivate: () => {
+    deactivate: async () => {
       if (!selected.length) return
-      bulkUpdate(selected, { status: "inactive" })
-      toast({ title: "Deactivated", description: `${selected.length} question(s) deactivated.` })
-      setSelected([])
+      try {
+        await bulkUpdate(selected, { status: "inactive" })
+        toast({ title: "Deactivated", description: `${selected.length} question(s) deactivated.` })
+        setSelected([])
+      } catch (error) {
+        toast({
+          title: "Error",
+          description: error instanceof Error ? error.message : "Failed to deactivate questions",
+          // variant: "destructive",
+        })
+      }
     },
-    delete: () => {
+    delete: async () => {
       if (!selected.length) return
       if (!confirm(`Delete ${selected.length} question(s)?`)) return
-      selected.forEach(id => remove(id))
-      toast({ title: "Deleted", description: `${selected.length} question(s) deleted.` })
-      setSelected([])
+      try {
+        await Promise.all(selected.map((id) => remove(id)))
+        toast({ title: "Deleted", description: `${selected.length} question(s) deleted.` })
+        setSelected([])
+      } catch (error) {
+        toast({
+          title: "Error",
+          description: error instanceof Error ? error.message : "Failed to delete questions",
+          // variant: "destructive",
+        })
+      }
     },
   }
 
   return (
     <Card className="shadow-sm">
       <CardContent className="grid gap-3 p-4">
-        {/* Toolbar */}
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-2 md:flex-1">
-            <Input
-              placeholder="Search questions..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="w-full md:max-w-md"
-            />
+            {!reorderMode && (
+              <Input
+                placeholder="Search questions..."
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                className="w-full md:max-w-md"
+              />
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Select value={pathFilter} onValueChange={(v: any) => setPathFilter(v)}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="All Paths" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Paths</SelectItem>
-                <SelectItem value="New Business">New Business</SelectItem>
-                <SelectItem value="Existing Business">Existing Business</SelectItem>
-                <SelectItem value="Growth Stage">Growth Stage</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={typeFilter} onValueChange={(v: any) => setTypeFilter(v)}>
-              <SelectTrigger className="w-[140px]">
-                <SelectValue placeholder="All Types" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Types</SelectItem>
-                <SelectItem value="text">Text Input</SelectItem>
-                <SelectItem value="single_select">Single Select</SelectItem>
-                <SelectItem value="multi_select">Multi Select</SelectItem>
-                <SelectItem value="date">Date</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={statusFilter} onValueChange={(v: any) => setStatusFilter(v)}>
-              <SelectTrigger className="w-[140px]">
-                <SelectValue placeholder="All Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="active">Active</SelectItem>
-                <SelectItem value="draft">Draft</SelectItem>
-                <SelectItem value="inactive">Inactive</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={sort} onValueChange={(v: any) => setSort(v)}>
-              <SelectTrigger className="w-[160px]">
-                <SelectValue placeholder="Sort by" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="modified-desc">Date Modified (newest)</SelectItem>
-                <SelectItem value="modified-asc">Date Modified (oldest)</SelectItem>
-              </SelectContent>
-            </Select>
+            <Button variant={reorderMode ? "default" : "outline"} size="sm" onClick={() => setReorderMode((v) => !v)}>
+              {reorderMode ? "Done Reordering" : "Reorder Mode"}
+            </Button>
+            {!reorderMode && (
+              <>
+                <Select value={pathFilter} onValueChange={(v: any) => setPathFilter(v)}>
+                  <SelectTrigger className="w-[150px]">
+                    <SelectValue placeholder="All Paths" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Paths</SelectItem>
+                    <SelectItem value="New Business">New Business</SelectItem>
+                    <SelectItem value="Existing Business">Existing Business</SelectItem>
+                    <SelectItem value="Growth Stage">Growth Stage</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={typeFilter} onValueChange={(v: any) => setTypeFilter(v)}>
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue placeholder="All Types" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Types</SelectItem>
+                    <SelectItem value="text">Text Input</SelectItem>
+                    <SelectItem value="single_select">Single Select</SelectItem>
+                    <SelectItem value="multi_select">Multi Select</SelectItem>
+                    <SelectItem value="date">Date</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={statusFilter} onValueChange={(v: any) => setStatusFilter(v)}>
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue placeholder="All Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="draft">Draft</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={sort} onValueChange={(v: any) => setSort(v)}>
+                  <SelectTrigger className="w-[160px]">
+                    <SelectValue placeholder="Sort by" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="modified-desc">Date Modified (newest)</SelectItem>
+                    <SelectItem value="modified-asc">Date Modified (oldest)</SelectItem>
+                    <SelectItem value="display-asc">Display Order</SelectItem>
+                  </SelectContent>
+                </Select>
+              </>
+            )}
           </div>
         </div>
 
-        {/* Bulk actions */}
-        <div className="flex flex-wrap items-center gap-2">
-          <Checkbox
-            checked={allSelectedOnPage}
-            onCheckedChange={(v) => toggleAllOnPage(!!v)}
-            id="selectAll"
-          />
-          <Label htmlFor="selectAll" className="text-sm text-muted-foreground">
-            Select All ({filtered.length} questions)
-          </Label>
+        {!reorderMode && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Checkbox checked={allSelectedOnPage} onCheckedChange={(v) => toggleAllOnPage(!!v)} id="selectAll" />
+            <Label htmlFor="selectAll" className="text-sm text-muted-foreground">
+              Select All ({filtered.length} questions)
+            </Label>
+            <Button variant="outline" size="sm" onClick={bulk.activate}>
+              Activate
+            </Button>
+            <Button variant="outline" size="sm" onClick={bulk.deactivate}>
+              Deactivate
+            </Button>
+            <Button variant="destructive" size="sm" onClick={bulk.delete}>
+              Delete
+            </Button>
+          </div>
+        )}
 
-          <Button variant="outline" size="sm" onClick={bulk.activate}>Activate</Button>
-          <Button variant="outline" size="sm" onClick={bulk.deactivate}>Deactivate</Button>
-          <Button variant="destructive" size="sm" onClick={bulk.delete}>Delete</Button>
-        </div>
-
-        {/* Table */}
         <div className="rounded-md border bg-background">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-10"></TableHead>
+                <TableHead className="w-10">{reorderMode ? "#" : ""}</TableHead>
                 <TableHead className="w-8"></TableHead>
                 <TableHead>Question</TableHead>
-                <TableHead className="w-40">Type</TableHead>
+                <TableHead className="w-36">Type</TableHead>
+                <TableHead className="w-32">Order</TableHead>
                 <TableHead className="w-44">Path</TableHead>
                 <TableHead className="w-28">Status</TableHead>
                 <TableHead className="w-36">Modified</TableHead>
@@ -206,18 +295,29 @@ function QuestionsTable() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {pageRows.map(row => {
+              {pageRows.map((row) => {
                 const checked = selected.includes(row.id)
                 return (
-                  <TableRow key={row.id} className="align-top">
+                  <TableRow
+                    key={row.id}
+                    className={reorderMode ? "cursor-move" : ""}
+                    draggable={reorderMode}
+                    onDragStart={() => onDragStart(row.id)}
+                    onDragOver={onDragOver}
+                    onDrop={() => onDrop(row.id)}
+                  >
                     <TableCell className="pt-4">
-                      <Checkbox
-                        checked={checked}
-                        onCheckedChange={(v) =>
-                          setSelected(prev => v ? [...prev, row.id] : prev.filter(x => x !== row.id))
-                        }
-                        aria-label={`Select ${row.id}`}
-                      />
+                      {reorderMode ? (
+                        <GripVertical className="size-4 text-muted-foreground" />
+                      ) : (
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={(v) =>
+                            setSelected((prev) => (v ? [...prev, row.id] : prev.filter((x) => x !== row.id)))
+                          }
+                          aria-label={`Select ${row.id}`}
+                        />
+                      )}
                     </TableCell>
                     <TableCell className="pt-4 text-muted-foreground">
                       <GripVertical className="size-4" aria-hidden="true" />
@@ -229,6 +329,7 @@ function QuestionsTable() {
                     <TableCell className="pt-4">
                       <TypeBadge type={row.type} />
                     </TableCell>
+                    <TableCell className="pt-4">{row.order}</TableCell>
                     <TableCell className="pt-4">
                       {row.paths.length === 3 ? "All Paths" : row.paths.join(", ")}
                     </TableCell>
@@ -237,7 +338,9 @@ function QuestionsTable() {
                     </TableCell>
                     <TableCell className="pt-4 text-sm text-muted-foreground">
                       {new Date(row.updatedAt).toLocaleDateString("en-US", {
-                        month: "short", day: "2-digit", year: "numeric",
+                        month: "short",
+                        day: "2-digit",
+                        year: "numeric",
                       })}
                     </TableCell>
                     <TableCell className="pt-3 text-right">
@@ -248,16 +351,40 @@ function QuestionsTable() {
                         <Button variant="ghost" size="icon" onClick={() => router.push(`/questions/${row.id}/edit`)}>
                           <Pencil className="size-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" onClick={() => {
-                          const copy = duplicate(row.id)
-                          if (copy) router.push(`/questions/${copy.id}/edit`)
-                        }}>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={async () => {
+                            try {
+                              const copy = await duplicate(row.id)
+                              if (copy) router.push(`/questions/${copy.id}/edit`)
+                            } catch (error) {
+                              toast({
+                                title: "Error",
+                                description: error instanceof Error ? error.message : "Failed to duplicate question",
+                                // variant: "destructive",
+                              })
+                            }
+                          }}
+                        >
                           <Copy className="size-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" onClick={() => {
-                          if (!confirm("Delete this question?")) return
-                          remove(row.id)
-                        }}>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={async () => {
+                            if (!confirm("Delete this question?")) return
+                            try {
+                              await remove(row.id)
+                            } catch (error) {
+                              toast({
+                                title: "Error",
+                                description: error instanceof Error ? error.message : "Failed to delete question",
+                                // variant: "destructive",
+                              })
+                            }
+                          }}
+                        >
                           <Trash2 className="size-4 text-rose-600" />
                         </Button>
                       </div>
@@ -267,7 +394,7 @@ function QuestionsTable() {
               })}
               {pageRows.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center text-muted-foreground py-10">
+                  <TableCell colSpan={9} className="text-center text-muted-foreground py-10">
                     No questions match your filters.
                   </TableCell>
                 </TableRow>
@@ -276,27 +403,39 @@ function QuestionsTable() {
           </Table>
         </div>
 
-        {/* Pagination */}
-        <div className="flex items-center justify-between">
-          <div className="text-sm text-muted-foreground">
-            Showing {filtered.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1} to{" "}
-            {Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length} questions
+        {!reorderMode && (
+          <div className="flex items-center justify-between">
+            <div className="text-sm text-muted-foreground">
+              Showing {filtered.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1} to{" "}
+              {Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length} questions
+            </div>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                <ChevronLeft className="mr-1 size-4" /> Previous
+              </Button>
+              <div className="px-3 text-sm">{page}</div>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
+                Next <ChevronRight className="ml-1 size-4" />
+              </Button>
+            </div>
           </div>
-          <div className="flex items-center gap-1">
-            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>
-              <ChevronLeft className="mr-1 size-4" /> Previous
-            </Button>
-            <div className="px-3 text-sm">{page}</div>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= totalPages}
-              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-            >
-              Next <ChevronRight className="ml-1 size-4" />
-            </Button>
+        )}
+
+        {reorderMode && (
+          <div className="text-xs text-muted-foreground">
+            Drag rows to set the display order. Changes save automatically.
           </div>
-        </div>
+        )}
       </CardContent>
     </Card>
   )

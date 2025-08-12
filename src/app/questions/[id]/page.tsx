@@ -7,10 +7,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
-import { ChevronLeft, Pencil, Trash2 } from 'lucide-react'
+import { ChevronLeft, Pencil, Trash2 } from "lucide-react"
 import { useQuestions } from "@/lib/questions"
 import { StatusBadge, TypeBadge } from "@/components/badges"
-import { QuestionPreview } from "@/components/question-preview"
+import { FlowPreview } from "@/components/flow-preview"
 
 export default function QuestionDetailsPage() {
   const params = useParams<{ id: string }>()
@@ -35,7 +35,10 @@ export default function QuestionDetailsPage() {
   return (
     <PageShell title="Question Details" subtitle={`ID: ${q.id}`}>
       <div className="mb-3">
-        <Link href="/questions" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground">
+        <Link
+          href="/questions"
+          className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground"
+        >
           <ChevronLeft className="mr-1 size-4" />
           Back to Questions
         </Link>
@@ -66,10 +69,17 @@ export default function QuestionDetailsPage() {
             </div>
 
             <div>
+              <div className="text-xs text-muted-foreground mb-1">Order</div>
+              <Badge variant="outline">{q.order}</Badge>
+            </div>
+
+            <div>
               <div className="text-xs text-muted-foreground mb-1">Paths</div>
               <div className="flex flex-wrap gap-2">
-                {q.paths.map(p => (
-                  <Badge key={p} variant="outline" className="bg-slate-50">{p}</Badge>
+                {q.paths.map((p) => (
+                  <Badge key={p} variant="outline" className="bg-slate-50">
+                    {p}
+                  </Badge>
                 ))}
               </div>
             </div>
@@ -104,14 +114,7 @@ export default function QuestionDetailsPage() {
             <CardTitle className="text-base">Live Preview</CardTitle>
           </CardHeader>
           <CardContent className="p-4">
-            <QuestionPreview
-              question={{
-                text: q.text,
-                type: q.type,
-                helpText: q.helpText,
-                required: q.required,
-              }}
-            />
+            <FlowPreview startId={q.id} />
           </CardContent>
         </Card>
       </div>
