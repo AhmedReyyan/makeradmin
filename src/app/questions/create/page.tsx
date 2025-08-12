@@ -65,11 +65,26 @@ export default function CreateQuestionPage() {
     })
   }
 
-  const save = () => {
-    const q = addBlank()
-    update(q.id, { ...q, ...state, status: "draft" })
-    router.replace(`/questions/${q.id}/edit`)
+const save = async () => {
+  try {
+    const res = await fetch("/api/questions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...state, status: "draft" }),
+    });
+
+    if (!res.ok) {
+      console.error("Failed to save question");
+      return;
+    }
+
+    const { insertedId } = await res.json();
+    router.replace(`/questions/${insertedId}/edit`);
+  } catch (err) {
+    console.error("Error saving question:", err);
   }
+};
+
 
   return (
     <PageShell
