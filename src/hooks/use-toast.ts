@@ -10,6 +10,7 @@ export interface Toast {
   description?: string
   type?: ToastType
   duration?: number
+  variany?: string
 }
 
 interface ToastContextValue {

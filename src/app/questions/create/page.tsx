@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { ChevronLeft, Save } from "lucide-react"
 import { PageShell } from "@/components/page-shell"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -16,8 +16,9 @@ import { Button } from "@/components/ui/button"
 import { PATH_COUNTS, type OnboardingPath, useQuestions } from "@/lib/questions"
 import type { QuestionType } from "@/components/badges"
 import { formatTypeLabel } from "@/components/badges"
-import { QuestionPreview } from "@/components/question-preview"
 import { OptionEditor } from "@/components/option-editor"
+import { FlowPreview } from "@/components/flow-preview"
+import { useToast } from "@/hooks/use-toast"
 
 type DraftState = {
   text: string
@@ -26,11 +27,15 @@ type DraftState = {
   required: boolean
   helpText: string
   options: string[]
+  order: number
 }
 
 export default function CreateQuestionPage() {
   const router = useRouter()
-  const { addBlank, update } = useQuestions()
+  const { addBlank, update, questions } = useQuestions()
+  const { toast } = useToast()
+
+  const defaultOrder = useMemo(() => questions.reduce((m, q) => Math.max(m, q.order), 0) + 1, [questions])
 
   const [state, setState] = useState<DraftState>({
     text: "",
@@ -39,8 +44,11 @@ export default function CreateQuestionPage() {
     required: false,
     helpText: "This helps us understand your business foundation and tailor recommendations.",
     options: [],
+    order: defaultOrder,
   })
+
   const [autoPreview, setAutoPreview] = useState(true)
+  const [saving, setSaving] = useState(false)
 
   const togglePath = (p: OnboardingPath) => {
     setState((s) => {
@@ -60,11 +68,22 @@ export default function CreateQuestionPage() {
     })
   }
 
-  const save = () => {
-    const q = addBlank()
-    update(q.id, { ...q, ...state, status: "draft" })
-    router.replace('/questions')
-    // router.replace(`/questions/${q.id}/edit`)
+  const save = async () => {
+    try {
+      setSaving(true)
+      const q = await addBlank()
+      await update(q.id, { ...state, status: "draft" })
+      toast({ title: "Question created", description: "Your question has been saved." })
+      router.replace(`/questions/${q.id}/edit`)
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to create question",
+        // variant: "destructive",
+      })
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -167,13 +186,27 @@ export default function CreateQuestionPage() {
               </div>
             </div>
 
+            <div className="grid gap-2">
+              <Label htmlFor="order">Display Order</Label>
+              <Input
+                id="order"
+                type="number"
+                min={1}
+                value={state.order}
+                onChange={(e) => setState((s) => ({ ...s, order: Math.max(1, Number(e.target.value) || 1) }))}
+              />
+              <div className="text-xs text-muted-foreground">
+                Lower numbers appear earlier. You can also reorder later in Questions Management.
+              </div>
+            </div>
+
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <Button variant="outline" size="sm" onClick={() => history.back()}>
                 Cancel
               </Button>
-              <Button size="sm" onClick={save}>
+              <Button size="sm" onClick={save} disabled={saving}>
                 <Save className="mr-2 size-4" />
-                Save Changes
+                {saving ? "Creating..." : "Save Changes"}
               </Button>
             </div>
           </CardContent>
@@ -185,15 +218,20 @@ export default function CreateQuestionPage() {
               <CardTitle className="text-base">Live Preview</CardTitle>
             </CardHeader>
             <CardContent className="p-4">
-              <QuestionPreview
-                question={{
-                  text: state.text,
-                  type: state.type,
-                  helpText: state.helpText,
-                  required: state.required,
-                  options: state.options,
+              <FlowPreview
+                startId="draft"
+                inject={{
+                  id: "draft",
+                  data: {
+                    text: state.text,
+                    type: state.type,
+                    helpText: state.helpText,
+                    required: state.required,
+                    options: state.options,
+                    order: state.order,
+                    paths: state.paths,
+                  },
                 }}
-                currentPath={state.paths[0]}
               />
             </CardContent>
           </Card>

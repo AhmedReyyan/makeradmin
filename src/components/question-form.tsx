@@ -16,8 +16,8 @@ import type { OnboardingPath } from "@/lib/questions"
 import { PATH_COUNTS, useQuestions } from "@/lib/questions"
 import type { QuestionType } from "@/components/badges"
 import { formatTypeLabel } from "@/components/badges"
-import { QuestionPreview } from "@/components/question-preview"
 import { OptionEditor } from "@/components/option-editor"
+import { FlowPreview } from "@/components/flow-preview"
 
 type EditState = {
   text: string
@@ -28,13 +28,7 @@ type EditState = {
   options: string[]
 }
 
-export function QuestionForm({
-  id,
-  onSaved,
-}: {
-  id: string
-  onSaved?: () => void
-}) {
+export function QuestionForm({ id, onSaved }: { id: string; onSaved?: () => void }) {
   const { getById, update, remove } = useQuestions()
   const router = useRouter()
   const { toast } = useToast()
@@ -51,24 +45,29 @@ export function QuestionForm({
 
   const [autoPreview, setAutoPreview] = useState(true)
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
   const debounceRef = useRef<number | null>(null)
 
-  // Autosave on changes with small debounce
   useEffect(() => {
     if (!autoPreview || !source) return
     if (debounceRef.current) window.clearTimeout(debounceRef.current)
-    debounceRef.current = window.setTimeout(() => {
-      update(source.id, { ...source, ...state })
-      setLastSavedAt(new Date().toISOString())
-    }, 500)
+    debounceRef.current = window.setTimeout(async () => {
+      try {
+        setSaving(true)
+        await update(source.id, { ...state })
+        setLastSavedAt(new Date().toISOString())
+      } catch (error) {
+        console.error("Auto-save failed:", error)
+      } finally {
+        setSaving(false)
+      }
+    }, 800)
     return () => {
       if (debounceRef.current) window.clearTimeout(debounceRef.current)
     }
   }, [state, autoPreview, source, update])
 
-  if (!source) {
-    return <p className="text-muted-foreground">Question not found.</p>
-  }
+  if (!source) return <p className="text-muted-foreground">Question not found.</p>
 
   const togglePath = (p: OnboardingPath) => {
     setState((s) => {
@@ -78,18 +77,37 @@ export function QuestionForm({
     })
   }
 
-  const save = () => {
-    update(source.id, { ...source, ...state })
-    setLastSavedAt(new Date().toISOString())
-    toast({ title: "Saved", description: "Changes have been saved." })
-    onSaved?.()
+  const save = async () => {
+    try {
+      setSaving(true)
+      await update(source.id, { ...state })
+      setLastSavedAt(new Date().toISOString())
+      toast({ title: "Saved", description: "Changes have been saved." })
+      onSaved?.()
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to save changes",
+        // variant: "destructive",
+      })
+    } finally {
+      setSaving(false)
+    }
   }
 
-  const del = () => {
+  const del = async () => {
     if (!confirm("Delete this question? This action cannot be undone.")) return
-    remove(source.id)
-    toast({ title: "Question deleted" })
-    router.push("/questions")
+    try {
+      await remove(source.id)
+      toast({ title: "Question deleted" })
+      router.push("/questions")
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to delete question",
+        // variant: "destructive",
+      })
+    }
   }
 
   const onTypeChange = (t: QuestionType) => {
@@ -104,7 +122,6 @@ export function QuestionForm({
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      {/* Left: Form */}
       <Card className="shadow-sm">
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Question Details</CardTitle>
@@ -140,11 +157,7 @@ export function QuestionForm({
           </div>
 
           {(state.type === "single_select" || state.type === "multi_select") && (
-            <OptionEditor
-              options={state.options}
-              onChange={(opts) => setState((s) => ({ ...s, options: opts }))}
-              typeLabel={state.type === "single_select" ? "Option" : "Option"}
-            />
+            <OptionEditor options={state.options} onChange={(opts) => setState((s) => ({ ...s, options: opts }))} />
           )}
 
           <div className="grid gap-2">
@@ -202,31 +215,21 @@ export function QuestionForm({
             <Button variant="outline" size="sm" onClick={() => history.back()}>
               Cancel
             </Button>
-            <Button size="sm" onClick={save}>
+            <Button size="sm" onClick={save} disabled={saving}>
               <Save className="mr-2 size-4" />
-              Save Changes
+              {saving ? "Saving..." : "Save Changes"}
             </Button>
           </div>
         </CardContent>
       </Card>
 
-      {/* Right: Live preview */}
       <div className="space-y-3">
         <Card className="shadow-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Live Preview</CardTitle>
           </CardHeader>
           <CardContent className="p-4">
-            <QuestionPreview
-              question={{
-                text: state.text,
-                type: state.type,
-                helpText: state.helpText,
-                required: state.required,
-                options: state.options,
-              }}
-              currentPath={state.paths[0]}
-            />
+            <FlowPreview startId={source.id} inject={{ id: source.id, data: { ...state } }} />
           </CardContent>
         </Card>
 
@@ -238,7 +241,9 @@ export function QuestionForm({
                 Preview updates automatically as you edit
               </label>
             </div>
-            {lastSavedAt ? (
+            {saving ? (
+              <div className="text-xs text-muted-foreground">Saving...</div>
+            ) : lastSavedAt ? (
               <div className="text-xs text-muted-foreground">Auto-saved just now</div>
             ) : (
               <div className="text-xs text-muted-foreground">Enable to autosave</div>
