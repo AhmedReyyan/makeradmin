@@ -11,11 +11,12 @@ export default function NewQuestionPage() {
   const { addBlank } = useQuestions()
   const router = useRouter()
 
-  useEffect(() => {
-    const q = addBlank()
+  useEffect( () => {
+    async () => {
+    const q = await addBlank(); // ✅ Wait for it
     // Defer to allow paint of the skeleton once before redirect
     const t = setTimeout(() => router.replace(`/questions/${q.id}/edit`), 50)
-    return () => clearTimeout(t)
+    return () => clearTimeout(t)}
   }, [addBlank, router])
 
   return (
