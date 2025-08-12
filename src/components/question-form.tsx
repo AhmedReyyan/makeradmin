@@ -45,15 +45,23 @@ export function QuestionForm({ id, onSaved }: { id: string; onSaved?: () => void
 
   const [autoPreview, setAutoPreview] = useState(true)
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
   const debounceRef = useRef<number | null>(null)
 
   useEffect(() => {
     if (!autoPreview || !source) return
     if (debounceRef.current) window.clearTimeout(debounceRef.current)
-    debounceRef.current = window.setTimeout(() => {
-      update(source.id, { ...source, ...state })
-      setLastSavedAt(new Date().toISOString())
-    }, 400)
+    debounceRef.current = window.setTimeout(async () => {
+      try {
+        setSaving(true)
+        await update(source.id, { ...state })
+        setLastSavedAt(new Date().toISOString())
+      } catch (error) {
+        console.error("Auto-save failed:", error)
+      } finally {
+        setSaving(false)
+      }
+    }, 800)
     return () => {
       if (debounceRef.current) window.clearTimeout(debounceRef.current)
     }
@@ -69,18 +77,37 @@ export function QuestionForm({ id, onSaved }: { id: string; onSaved?: () => void
     })
   }
 
-  const save = () => {
-    update(source.id, { ...source, ...state })
-    setLastSavedAt(new Date().toISOString())
-    toast({ title: "Saved", description: "Changes have been saved." })
-    onSaved?.()
+  const save = async () => {
+    try {
+      setSaving(true)
+      await update(source.id, { ...state })
+      setLastSavedAt(new Date().toISOString())
+      toast({ title: "Saved", description: "Changes have been saved." })
+      onSaved?.()
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to save changes",
+        // variant: "destructive",
+      })
+    } finally {
+      setSaving(false)
+    }
   }
 
-  const del = () => {
+  const del = async () => {
     if (!confirm("Delete this question? This action cannot be undone.")) return
-    remove(source.id)
-    toast({ title: "Question deleted" })
-    router.push("/questions")
+    try {
+      await remove(source.id)
+      toast({ title: "Question deleted" })
+      router.push("/questions")
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to delete question",
+        // variant: "destructive",
+      })
+    }
   }
 
   const onTypeChange = (t: QuestionType) => {
@@ -188,9 +215,9 @@ export function QuestionForm({ id, onSaved }: { id: string; onSaved?: () => void
             <Button variant="outline" size="sm" onClick={() => history.back()}>
               Cancel
             </Button>
-            <Button size="sm" onClick={save}>
+            <Button size="sm" onClick={save} disabled={saving}>
               <Save className="mr-2 size-4" />
-              Save Changes
+              {saving ? "Saving..." : "Save Changes"}
             </Button>
           </div>
         </CardContent>
@@ -214,7 +241,9 @@ export function QuestionForm({ id, onSaved }: { id: string; onSaved?: () => void
                 Preview updates automatically as you edit
               </label>
             </div>
-            {lastSavedAt ? (
+            {saving ? (
+              <div className="text-xs text-muted-foreground">Saving...</div>
+            ) : lastSavedAt ? (
               <div className="text-xs text-muted-foreground">Auto-saved just now</div>
             ) : (
               <div className="text-xs text-muted-foreground">Enable to autosave</div>

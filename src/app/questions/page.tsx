@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { ChevronLeft, ChevronRight, Copy, Eye, GripVertical, Pencil, Trash2 } from "lucide-react"
+import { ChevronLeft, ChevronRight, Copy, Eye, GripVertical, Pencil, Trash2, Loader2 } from "lucide-react"
 import { PageShell } from "@/components/page-shell"
 import { StatusBadge, TypeBadge } from "@/components/badges"
 import { useQuestions, type OnboardingPath } from "@/lib/questions"
@@ -20,6 +20,36 @@ import { useToast } from "@/hooks/use-toast"
 const PAGE_SIZE = 10
 
 export default function QuestionsManagementPage() {
+  const { loading, error } = useQuestions()
+
+  if (loading) {
+    return (
+      <PageShell title="Questions Management" right={<AddQuestionButton />}>
+        <Card className="shadow-sm">
+          <CardContent className="flex items-center justify-center p-8">
+            <Loader2 className="size-6 animate-spin mr-2" />
+            <span>Loading questions...</span>
+          </CardContent>
+        </Card>
+      </PageShell>
+    )
+  }
+
+  if (error) {
+    return (
+      <PageShell title="Questions Management" right={<AddQuestionButton />}>
+        <Card className="shadow-sm">
+          <CardContent className="flex items-center justify-center p-8">
+            <div className="text-center">
+              <p className="text-red-600 mb-2">Error loading questions</p>
+              <p className="text-sm text-muted-foreground">{error}</p>
+            </div>
+          </CardContent>
+        </Card>
+      </PageShell>
+    )
+  }
+
   return (
     <PageShell title="Questions Management" right={<AddQuestionButton />}>
       <QuestionsTable />
@@ -82,10 +112,9 @@ function QuestionsTable() {
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const pageRows = reorderMode ? filtered : filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
-  // Drag and drop handlers for reorder mode (works across full list)
   const onDragStart = (id: string) => setDragId(id)
   const onDragOver = (e: React.DragEvent<HTMLTableRowElement>) => e.preventDefault()
-  const onDrop = (overId: string) => {
+  const onDrop = async (overId: string) => {
     if (!dragId || dragId === overId) return
     const ids = filtered.map((r) => r.id)
     const from = ids.indexOf(dragId)
@@ -94,7 +123,17 @@ function QuestionsTable() {
     const next = [...ids]
     const [moved] = next.splice(from, 1)
     next.splice(to, 0, moved)
-    reorderQuestions(next) // persists order
+
+    try {
+      await reorderQuestions(next)
+      toast({ title: "Order updated", description: "Questions have been reordered." })
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to reorder questions",
+        // variant: "destructive",
+      })
+    }
     setDragId(null)
   }
 
@@ -108,24 +147,48 @@ function QuestionsTable() {
   }
 
   const bulk = {
-    activate: () => {
+    activate: async () => {
       if (!selected.length) return
-      bulkUpdate(selected, { status: "active" })
-      toast({ title: "Activated", description: `${selected.length} question(s) activated.` })
-      setSelected([])
+      try {
+        await bulkUpdate(selected, { status: "active" })
+        toast({ title: "Activated", description: `${selected.length} question(s) activated.` })
+        setSelected([])
+      } catch (error) {
+        toast({
+          title: "Error",
+          description: error instanceof Error ? error.message : "Failed to activate questions",
+          // variant: "destructive",
+        })
+      }
     },
-    deactivate: () => {
+    deactivate: async () => {
       if (!selected.length) return
-      bulkUpdate(selected, { status: "inactive" })
-      toast({ title: "Deactivated", description: `${selected.length} question(s) deactivated.` })
-      setSelected([])
+      try {
+        await bulkUpdate(selected, { status: "inactive" })
+        toast({ title: "Deactivated", description: `${selected.length} question(s) deactivated.` })
+        setSelected([])
+      } catch (error) {
+        toast({
+          title: "Error",
+          description: error instanceof Error ? error.message : "Failed to deactivate questions",
+          // variant: "destructive",
+        })
+      }
     },
-    delete: () => {
+    delete: async () => {
       if (!selected.length) return
       if (!confirm(`Delete ${selected.length} question(s)?`)) return
-      selected.forEach((id) => remove(id))
-      toast({ title: "Deleted", description: `${selected.length} question(s) deleted.` })
-      setSelected([])
+      try {
+        await Promise.all(selected.map((id) => remove(id)))
+        toast({ title: "Deleted", description: `${selected.length} question(s) deleted.` })
+        setSelected([])
+      } catch (error) {
+        toast({
+          title: "Error",
+          description: error instanceof Error ? error.message : "Failed to delete questions",
+          // variant: "destructive",
+        })
+      }
     },
   }
 
@@ -232,7 +295,7 @@ function QuestionsTable() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {pageRows.map((row, idx) => {
+              {pageRows.map((row) => {
                 const checked = selected.includes(row.id)
                 return (
                   <TableRow
@@ -291,9 +354,17 @@ function QuestionsTable() {
                         <Button
                           variant="ghost"
                           size="icon"
-                          onClick={() => {
-                            const copy = duplicate(row.id)
-                            if (copy) router.push(`/questions/${copy.id}/edit`)
+                          onClick={async () => {
+                            try {
+                              const copy = await duplicate(row.id)
+                              if (copy) router.push(`/questions/${copy.id}/edit`)
+                            } catch (error) {
+                              toast({
+                                title: "Error",
+                                description: error instanceof Error ? error.message : "Failed to duplicate question",
+                                // variant: "destructive",
+                              })
+                            }
                           }}
                         >
                           <Copy className="size-4" />
@@ -301,9 +372,17 @@ function QuestionsTable() {
                         <Button
                           variant="ghost"
                           size="icon"
-                          onClick={() => {
+                          onClick={async () => {
                             if (!confirm("Delete this question?")) return
-                            remove(row.id)
+                            try {
+                              await remove(row.id)
+                            } catch (error) {
+                              toast({
+                                title: "Error",
+                                description: error instanceof Error ? error.message : "Failed to delete question",
+                                // variant: "destructive",
+                              })
+                            }
                           }}
                         >
                           <Trash2 className="size-4 text-rose-600" />

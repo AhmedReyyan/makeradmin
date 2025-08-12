@@ -18,6 +18,7 @@ import type { QuestionType } from "@/components/badges"
 import { formatTypeLabel } from "@/components/badges"
 import { OptionEditor } from "@/components/option-editor"
 import { FlowPreview } from "@/components/flow-preview"
+import { useToast } from "@/hooks/use-toast"
 
 type DraftState = {
   text: string
@@ -32,6 +33,7 @@ type DraftState = {
 export default function CreateQuestionPage() {
   const router = useRouter()
   const { addBlank, update, questions } = useQuestions()
+  const { toast } = useToast()
 
   const defaultOrder = useMemo(() => questions.reduce((m, q) => Math.max(m, q.order), 0) + 1, [questions])
 
@@ -46,6 +48,7 @@ export default function CreateQuestionPage() {
   })
 
   const [autoPreview, setAutoPreview] = useState(true)
+  const [saving, setSaving] = useState(false)
 
   const togglePath = (p: OnboardingPath) => {
     setState((s) => {
@@ -65,10 +68,22 @@ export default function CreateQuestionPage() {
     })
   }
 
-  const save = () => {
-    const q = addBlank()
-    update(q.id, { ...q, ...state, status: "draft" })
-    router.replace(`/questions/${q.id}/edit`)
+  const save = async () => {
+    try {
+      setSaving(true)
+      const q = await addBlank()
+      await update(q.id, { ...state, status: "draft" })
+      toast({ title: "Question created", description: "Your question has been saved." })
+      router.replace(`/questions/${q.id}/edit`)
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to create question",
+        // variant: "destructive",
+      })
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -189,9 +204,9 @@ export default function CreateQuestionPage() {
               <Button variant="outline" size="sm" onClick={() => history.back()}>
                 Cancel
               </Button>
-              <Button size="sm" onClick={save}>
+              <Button size="sm" onClick={save} disabled={saving}>
                 <Save className="mr-2 size-4" />
-                Save Changes
+                {saving ? "Creating..." : "Save Changes"}
               </Button>
             </div>
           </CardContent>

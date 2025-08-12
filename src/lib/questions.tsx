@@ -10,7 +10,6 @@ import {
   useState,
   type ReactNode,
 } from "react"
-import { newQuestionId } from "./id"
 import type { QuestionStatus, QuestionType } from "@/components/badges"
 
 export type OnboardingPath = "New Business" | "Existing Business" | "Growth Stage"
@@ -23,192 +22,221 @@ export type Question = {
   required: boolean
   helpText?: string
   status: QuestionStatus
-  options?: string[] // for single_select and multi_select
-  order: number // display order (1-based)
-  createdAt: string // ISO
-  updatedAt: string // ISO
-}
-
-const STORAGE_KEY = "questions-v2" // bumped to v2 to include order/options
-
-const SEED: Question[] = [
-  {
-    id: "Q-1234",
-    text: "What is your primary business idea or concept?",
-    type: "text",
-    paths: ["New Business"],
-    required: true,
-    helpText: "This helps us understand your business foundation and tailor recommendations.",
-    status: "active",
-    options: [],
-    order: 1,
-    createdAt: "2025-01-10T10:00:00.000Z",
-    updatedAt: "2025-01-15T14:56:00.000Z",
-  },
-  {
-    id: "Q-2235",
-    text: "Which industry best describes your business?",
-    type: "single_select",
-    paths: ["New Business", "Existing Business", "Growth Stage"],
-    required: true,
-    helpText: "",
-    status: "active",
-    options: ["Technology", "Retail", "Healthcare", "Other"],
-    order: 2,
-    createdAt: "2025-01-11T09:30:00.000Z",
-    updatedAt: "2025-01-14T16:10:00.000Z",
-  },
-  {
-    id: "Q-3236",
-    text: "What are your primary revenue streams?",
-    type: "multi_select",
-    paths: ["Existing Business"],
-    required: false,
-    helpText: "",
-    status: "draft",
-    options: ["Subscriptions", "One-time Sales", "Ads", "Services"],
-    order: 3,
-    createdAt: "2025-01-12T08:45:00.000Z",
-    updatedAt: "2025-01-13T13:35:00.000Z",
-  },
-  {
-    id: "Q-4237",
-    text: "When did you start your business?",
-    type: "date",
-    paths: ["Existing Business"],
-    required: false,
-    helpText: "",
-    status: "inactive",
-    options: [],
-    order: 4,
-    createdAt: "2025-01-12T08:45:00.000Z",
-    updatedAt: "2025-01-12T12:05:00.000Z",
-  },
-]
-
-function loadInitial(): Question[] {
-  if (typeof window === "undefined") return SEED
-  const raw = localStorage.getItem(STORAGE_KEY)
-  if (!raw) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(SEED))
-    return SEED
-  }
-  try {
-    const parsed = JSON.parse(raw) as Question[]
-    return Array.isArray(parsed) ? parsed : SEED
-  } catch {
-    return SEED
-  }
-}
-
-function saveAll(list: Question[]) {
-  if (typeof window === "undefined") return
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(list))
-}
-
-function nextOrder(list: Question[]) {
-  return list.reduce((m, q) => Math.max(m, q.order), 0) + 1
+  options?: string[]
+  order: number
+  createdAt: string
+  updatedAt: string
 }
 
 type QuestionsContextValue = {
   questions: Question[]
-  addBlank(): Question
-  duplicate(id: string): Question | undefined
-  update(id: string, patch: Partial<Question>): void
-  remove(id: string): void
-  bulkUpdate(ids: string[], patch: Partial<Question>): void
-  reorderQuestions(newOrderIds: string[]): void
+  loading: boolean
+  error: string | null
+  addBlank(): Promise<Question>
+  duplicate(id: string): Promise<Question | undefined>
+  update(id: string, patch: Partial<Question>): Promise<void>
+  remove(id: string): Promise<void>
+  bulkUpdate(ids: string[], patch: Partial<Question>): Promise<void>
+  reorderQuestions(newOrderIds: string[]): Promise<void>
   getById(id: string): Question | undefined
+  refetch(): Promise<void>
 }
 
 const QuestionsContext = createContext<QuestionsContextValue | null>(null)
 
 export function QuestionsProvider({ children }: { children: ReactNode }) {
-  const [questions, setQuestions] = useState<Question[]>(loadInitial)
+  const [questions, setQuestions] = useState<Question[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const fetchQuestions = useCallback(async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const response = await fetch("/api/questions")
+      if (!response.ok) throw new Error("Failed to fetch questions")
+      const data = await response.json()
+      setQuestions(data)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to fetch questions")
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
-    saveAll(questions)
-  }, [questions])
+    fetchQuestions()
+  }, [fetchQuestions])
 
-  const addBlank = useCallback((): Question => {
-    const now = new Date().toISOString()
-    const q: Question = {
-      id: newQuestionId(),
-      text: "",
-      type: "text",
-      paths: ["New Business"],
-      required: false,
-      helpText: "",
-      status: "draft",
-      options: [],
-      order: nextOrder(questions),
-      createdAt: now,
-      updatedAt: now,
+  const addBlank = useCallback(async (): Promise<Question> => {
+    try {
+      const maxOrder = questions.reduce((max, q) => Math.max(max, q.order), 0)
+      const response = await fetch("/api/questions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: "",
+          type: "text",
+          paths: ["New Business"],
+          required: false,
+          helpText: "",
+          status: "draft",
+          options: [],
+          order: maxOrder + 1,
+        }),
+      })
+
+      if (!response.ok) throw new Error("Failed to create question")
+      const newQuestion = await response.json()
+      setQuestions((prev) => [newQuestion, ...prev])
+      return newQuestion
+    } catch (err) {
+      throw new Error(err instanceof Error ? err.message : "Failed to create question")
     }
-    setQuestions((prev) => [q, ...prev])
-    return q
   }, [questions])
 
   const duplicate = useCallback(
-    (id: string) => {
-      const source = questions.find((q) => q.id === id)
-      if (!source) return
-      const now = new Date().toISOString()
-      const copy: Question = {
-        ...source,
-        id: newQuestionId(),
-        status: "draft",
-        createdAt: now,
-        updatedAt: now,
-        text: source.text ? `${source.text} (Copy)` : "(Copy)",
-        order: nextOrder(questions),
+    async (id: string): Promise<Question | undefined> => {
+      try {
+        const source = questions.find((q) => q.id === id)
+        if (!source) return undefined
+
+        const maxOrder = questions.reduce((max, q) => Math.max(max, q.order), 0)
+        const response = await fetch("/api/questions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...source,
+            text: source.text ? `${source.text} (Copy)` : "(Copy)",
+            status: "draft",
+            order: maxOrder + 1,
+          }),
+        })
+
+        if (!response.ok) throw new Error("Failed to duplicate question")
+        const copy = await response.json()
+        setQuestions((prev) => [copy, ...prev])
+        return copy
+      } catch (err) {
+        throw new Error(err instanceof Error ? err.message : "Failed to duplicate question")
       }
-      setQuestions((prev) => [copy, ...prev])
-      return copy
     },
     [questions],
   )
 
-  const update = useCallback((id: string, patch: Partial<Question>) => {
-    setQuestions((prev) => prev.map((q) => (q.id === id ? { ...q, ...patch, updatedAt: new Date().toISOString() } : q)))
+  const update = useCallback(async (id: string, patch: Partial<Question>): Promise<void> => {
+    try {
+      const response = await fetch(`/api/questions/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      })
+
+      if (!response.ok) throw new Error("Failed to update question")
+      const updated = await response.json()
+      setQuestions((prev) => prev.map((q) => (q.id === id ? updated : q)))
+    } catch (err) {
+      throw new Error(err instanceof Error ? err.message : "Failed to update question")
+    }
   }, [])
 
-  const remove = useCallback((id: string) => {
-    setQuestions((prev) => prev.filter((q) => q.id !== id))
+  const remove = useCallback(async (id: string): Promise<void> => {
+    try {
+      const response = await fetch(`/api/questions/${id}`, {
+        method: "DELETE",
+      })
+
+      if (!response.ok) throw new Error("Failed to delete question")
+      setQuestions((prev) => prev.filter((q) => q.id !== id))
+    } catch (err) {
+      throw new Error(err instanceof Error ? err.message : "Failed to delete question")
+    }
   }, [])
 
-  const bulkUpdate = useCallback((ids: string[], patch: Partial<Question>) => {
-    setQuestions((prev) =>
-      prev.map((q) => (ids.includes(q.id) ? { ...q, ...patch, updatedAt: new Date().toISOString() } : q)),
-    )
+  const bulkUpdate = useCallback(async (ids: string[], patch: Partial<Question>): Promise<void> => {
+    try {
+      const response = await fetch("/api/questions/bulk", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, patch }),
+      })
+
+      if (!response.ok) throw new Error("Failed to bulk update questions")
+
+      // Update local state
+      setQuestions((prev) =>
+        prev.map((q) => (ids.includes(q.id) ? { ...q, ...patch, updatedAt: new Date().toISOString() } : q)),
+      )
+    } catch (err) {
+      throw new Error(err instanceof Error ? err.message : "Failed to bulk update questions")
+    }
   }, [])
 
-  const reorderQuestions = useCallback((newOrderIds: string[]) => {
-    setQuestions((prev) => {
-      const byId = new Map(prev.map((q) => [q.id, q]))
-      const ordered: Question[] = []
-      let n = 1
-      for (const id of newOrderIds) {
-        const q = byId.get(id)
-        if (!q) continue
-        ordered.push({ ...q, order: n, updatedAt: new Date().toISOString() })
-        byId.delete(id)
-        n++
+  const reorderQuestions = useCallback(
+    async (newOrderIds: string[]): Promise<void> => {
+      try {
+        const response = await fetch("/api/questions/reorder", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ orderedIds: newOrderIds }),
+        })
+
+        if (!response.ok) throw new Error("Failed to reorder questions")
+
+        // Update local state
+        const byId = new Map(questions.map((q) => [q.id, q]))
+        const reordered: Question[] = []
+
+        newOrderIds.forEach((id, index) => {
+          const q = byId.get(id)
+          if (q) {
+            reordered.push({ ...q, order: index + 1, updatedAt: new Date().toISOString() })
+            byId.delete(id)
+          }
+        })
+
+        // Add any remaining questions
+        Array.from(byId.values()).forEach((q, index) => {
+          reordered.push({ ...q, order: newOrderIds.length + index + 1, updatedAt: new Date().toISOString() })
+        })
+
+        setQuestions(reordered.sort((a, b) => a.order - b.order))
+      } catch (err) {
+        throw new Error(err instanceof Error ? err.message : "Failed to reorder questions")
       }
-      const rest = Array.from(byId.values()).sort((a, b) => a.order - b.order)
-      for (const q of rest) {
-        ordered.push({ ...q, order: n, updatedAt: new Date().toISOString() })
-        n++
-      }
-      return ordered
-    })
-  }, [])
+    },
+    [questions],
+  )
 
   const getById = useCallback((id: string) => questions.find((q) => q.id === id), [questions])
 
   const value = useMemo<QuestionsContextValue>(
-    () => ({ questions, addBlank, duplicate, update, remove, bulkUpdate, reorderQuestions, getById }),
-    [questions, addBlank, duplicate, update, remove, bulkUpdate, reorderQuestions, getById],
+    () => ({
+      questions,
+      loading,
+      error,
+      addBlank,
+      duplicate,
+      update,
+      remove,
+      bulkUpdate,
+      reorderQuestions,
+      getById,
+      refetch: fetchQuestions,
+    }),
+    [
+      questions,
+      loading,
+      error,
+      addBlank,
+      duplicate,
+      update,
+      remove,
+      bulkUpdate,
+      reorderQuestions,
+      getById,
+      fetchQuestions,
+    ],
   )
 
   return createElement(QuestionsContext.Provider, { value }, children as any)
