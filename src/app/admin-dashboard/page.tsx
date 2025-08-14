@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
-import { Activity, AlertTriangle, CheckCircle2, CircleHelp, Database, FileText, ListChecks, MessageSquare, SettingsIcon, Shield, SlidersHorizontal, User, UserCheck2, Users } from 'lucide-react'
+import { Activity, AlertTriangle, CheckCircle2, CircleHelp, Database, FileText, Inbox, ListChecks, MessageSquare, SettingsIcon, Shield, SlidersHorizontal, User, UserCheck2, Users } from 'lucide-react'
 import Link from "next/link"
 import Image from "next/image"
 import { cn } from "@/lib/utils"
@@ -44,6 +44,7 @@ const STATS: Stat[] = [
 
 const QUICK_ACCESS: QuickItem[] = [
   { id: "questions", label: "Questions", href: "/questions", icon: MessageSquare },
+  { id: "responses", label: "User Responses", href: "/responses", icon: Inbox },
   { id: "users", label: "Users", href: "#", icon: Users },
   { id: "reports", label: "Business Profile", href: "#", icon: FileText },
   { id: "settings", label: "Settings", href: "#", icon: SettingsIcon },
